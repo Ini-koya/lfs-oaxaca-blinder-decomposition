@@ -1,9 +1,17 @@
 # ========================================
-# Paths
+# Paths/Library
 # ========================================
-raw_dir <- "C:/Users/sndui/OneDrive/Dissertation/Dissertation project/3. Input data/modified raw data"
+#Library packages
+library(tidyverse)
+library(labelled)
+library(haven)
+library(writexl)
 
-out_dir <- "C:/Users/sndui/OneDrive/Dissertation/Econometrics project/3. Input data/Cleaned data"
+
+# Setting file paths
+raw_dir <- "C:/Users/sndui/OneDrive/Dissertation/Dissertation project/3. Input data/modified raw data/Combined data"
+
+out_dir <- "C:/Users/sndui/OneDrive/Dissertation/Dissertation project/3. Input data/Cleaned data"
 
 
 # LFS user guide: https://doc.ukdataservice.ac.uk/doc/8840/mrdoc/pdf/lfs_user_guide_vol3_variable_details_2021aj.pdf
@@ -11,7 +19,7 @@ out_dir <- "C:/Users/sndui/OneDrive/Dissertation/Econometrics project/3. Input d
 # Load data (replace filename as needed)
 # ========================================
 
-lfs_data <- read.csv(file.path(raw_dir, "combined_lfs_all_quarters.csv"))
+lfs_data <- readRDS(file.path(raw_dir, "combined_lfs_all_quarters.rds"))
 
 
 # ====================
@@ -406,7 +414,7 @@ lfs_data <- lfs_data %>%
 CPIH <- read_xlsx(file.path("C:/Users/sndui/OneDrive/Dissertation/Dissertation project/3. Input data/other inputs/CPIH.xlsx"))
 
 # Merge CPI data to LFS data
-full_join(lfs_data, CPIH, YearQuarter)
+lfs_data <- full_join(lfs_data, CPIH, by = "YearQuarter")
 
 # Assert each data point has been allocated a CPI Index value
 stopifnot(!is.na(Index))
@@ -509,7 +517,7 @@ lfs_data <- lfs_data %>% filter(EMPMON > 0 & !is.na(EMPMON) & EMPMON >= 0)
 
 # Generate tenure variable
 
-lfs_data <- lfs_data %>% mutate(tenure = case_when(tenure = EMPMON))
+lfs_data <- lfs_data %>% mutate(tenure = EMPMON)
 
 # Label employment tenure variable
 var_label(lfs_data$tenure) <- "Length of time continuously employed (months)"
@@ -579,12 +587,12 @@ core_var <- c(
 )
 
 # Assert core variables have no missing values
-for (var in core_vars) {
+for (var in core_var) {
   stopifnot(all(!is.na(lfs_data[[var]])))
 }
 
 # Assert core variables are all positive
-for (var in core_vars) {
+for (var in core_var) {
   stopifnot(all(lfs_data[[var]] > 0))
 }
 
@@ -594,8 +602,8 @@ for (var in core_vars) {
 # ========================================
 
 # Save as RDS (R native format)
-saveRDS(lfs_data, file.path(raw_dir))
+saveRDS(lfs_data, file.path(out_dir, "Clean.RDS"))
 
 # Save as Excel
 library(writexl)
-write_xlsx(lfs_data, file.path(out_dir))
+write_xlsx(lfs_data, file.path(out_dir, "Clean.xlsx"))
