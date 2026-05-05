@@ -8,14 +8,15 @@ library(labelled)
 library(haven)
 library(writexl)
 library(tidyr)
+library(RColorBrewer)
 
 # ========================================
 # Paths
 # ========================================
 
-clean_dir <- "C:/Users/sndui/OneDrive/Dissertation/Econometrics project/3. Input data/Cleaned data"
+clean_dir <- "C:/Users/sndui/OneDrive/Dissertation/Dissertation project/3. Input data/Cleaned data"
 
-lfs_data <- read.RDS(file.path(clean_dir, "Clean.RDS"))
+lfs_data <- readRDS(file.path(clean_dir, "Clean.RDS"))
 
 
 #=====================================================  
@@ -73,7 +74,7 @@ summary_wage_long <- summary_wage_pct %>%
     cols      = c(p10, p25, p50, p75, p90),
     names_to  = "percentile",
     values_to = "wage"
-  )
+  ) 
 
 # 3c. Plot percentile distribution of real hourly pay by ethnicity
 ggplot(summary_wage_long, aes(x = percentile, y = wage, fill = ethnic)) +
@@ -100,156 +101,209 @@ ggplot(summary_wage_long, aes(x = percentile, y = wage, fill = ethnic)) +
   
 lfs_data %>%
   group_by(ethnic) %>%
-  summarise(mean_age = mean(age, na.rm = TRUE))
-
-
-*******************************************************
+  summarise(mean_age = mean(age, na.rm = TRUE)) %>%
   
-  * 5. Immigration status by ethnicity
-
-*******************************************************
+  ggplot(data = ., aes(
+    x = reorder(ethnic, mean_age),  # THIS does the ordering
+    y = mean_age,
+    fill = ethnic
+  )) +
   
-  
-  
-  tab ethnic bborn, row
-
-table ethnic, statistic(mean bborn)
-
-
-
-*******************************************************
-  
-  * 6. Tenure by ethnicity
-
-*******************************************************
+  geom_col() +
   
   
+  scale_fill_brewer(palette = "Set2") +
   
-  graph bar (mean) tenure, over(ethnic) blabel(bar)
-
-table ethnic, statistic(mean tenure)
-
-
-
-*******************************************************
+  labs(
+    title = "Mean Age by Ethnic Group",
+    x = "Ethnic Group",
+    y = "Mean Age", fill= NULL
+  ) +
   
-  * 7. Number of dependent children by ethnicity
-
-*******************************************************
+  theme_minimal() +
   
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+
+
+#=====================================================
+  # 5. Immigration status by ethnicity
+#=====================================================
+
+ggplot(lfs_data, aes(x = ethnic, fill = factor(bborn))) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_manual(values = c("0" = "tomato", "1" = "steelblue"),
+                    labels = c("0" = "Not British-born", "1" = "British-born")) +
   
+  labs(
+    title = "British-born Status by Ethnic Group",
+    x = "Ethnic Group",
+    y = "Percentage", fill=NULL
+  ) +  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1)
+  )
+
+
+#=====================================================
+  # 6. Tenure by ethnicity
+#=====================================================
   
-  table ethnic, statistic(mean dep19)
+library(RColorBrewer)
+
+lfs_data %>% 
+  group_by(ethnic) %>%
+  summarise(mean_tenure = mean(tenure, na.rm = TRUE)) %>% 
+  ggplot(aes(x = ethnic, y = mean_tenure, fill = ethnic)) +
+  geom_col() +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title = "Tenure by ethnic group",
+    x = "Ethnic group",
+    y = "Tenure (Months)",
+    fill = "Ethnicity"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1)
+  )
 
 
 
-*******************************************************
+#======================================================
+  # 7. Number of dependent children by ethnicity
+#======================================================
+  lfs_data %>%
+  group_by(ethnic) %>%
+  summarise(mean_dep19 = mean(dep19, na.rm = TRUE)) %>%
   
-  * 8. Education by ethnicity
-
-*******************************************************
+  ggplot(aes(
+    x = reorder(ethnic, mean_dep19),
+    y = mean_dep19,
+    fill = ethnic
+  )) +
   
+  geom_col() +
   
+  geom_text(
+    aes(label = round(mean_dep19, 2)),
+    vjust = -0.3
+  ) +
   
-  gen qual = .
-
-replace qual = 1 if degree == 1
-
-replace qual = 2 if higher == 1
-
-replace qual = 3 if alevel == 1
-
-replace qual = 4 if gcse == 1
-
-replace qual = 5 if other == 1
-
-replace qual = 6 if none == 1
-
-
-
-label define qual_lbl ///
+  scale_fill_brewer(palette = "Set2") +
   
-  1 "Degree or equivalent" ///
+  labs(
+    title = "Number of dependent kids (≤19) by ethnic group",
+    x = "Ethnic group",
+    y = "Mean dependent kids (≤19)",
+    fill = "Ethnicity"
+  ) +
   
-  2 "Higher education" ///
+  theme_minimal() +
   
-  3 "A-level or equivalent" ///
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1),
+    legend.position = "none"
+  )
+
+  # stat_summary(fun = mean)
+  # adds group means without pre-calculating them
   
-  4 "GCSE A*-C or equivalent" ///
+#======================================================
+  # 8. Education by ethnicity
+#======================================================  
+ggplot(
+  lfs_data %>%
+    mutate(
+      qual = factor(
+        case_when(
+          degree == 1 ~ 1,
+          higher  == 1 ~ 2,
+          alevel  == 1 ~ 3,
+          gcse    == 1 ~ 4,
+          other   == 1 ~ 5,
+          none    == 1 ~ 6
+        ),
+        levels = 1:6,
+        labels = c(
+          "Degree or equivalent",
+          "Higher education",
+          "A-level or equivalent",
+          "GCSE A*-C or equivalent",
+          "Other qualifications",
+          "No qualifications"
+        )
+      )
+    ),
+  aes(x = ethnic, fill = qual)
+) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title = "Qualification distribution by ethnic group",
+    x = "Ethnic group",
+    y = "Percentage",
+    fill = NULL
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+
+#=====================================================
+  # 9. Marital status by ethnicity
+#=====================================================
   
-  5 "Other qualifications" ///
-  
-  6 "No qualifications", replace
+lfs_data %>%
+  mutate(
+    marr = factor(marr,
+                  levels = c(0, 1),
+                  labels = c("Non-married", "Married/cohabiting/civil partner")
+    )
+  ) %>%
+  ggplot(aes(x = ethnic, fill = marr)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title = "Marital status by ethnicity",
+    x = "Ethnic group",
+    y = "Percentage",
+    fill = "Marital status"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
 
+#=====================================================
+# 10. Occupation
+#=====================================================
 
-
-label values qual qual_lbl
-
-
-
-tab ethnic qual, row
-
-table ethnic qual, statistic(percent)
-
-
-
-*******************************************************
-  
-  * 9. Marital status by ethnicity
-
-*******************************************************
-  
-  
-  
-  label define marr_label ///
-  
-  1 "Married/cohabiting/civil partner" ///
-  
-  0 "Non-married", replace
-
-
-
-label values marr marr_label
-
-
-
-tab ethnic marr, row nofreq
-
-
-
-*******************************************************
-  
-  * 10. Occupation by ethnicity
-
-*******************************************************
-  
-  
-  
-  label define occup_lbl ///
-  
-  1 "Managers, Directors and Senior Officials" ///
-  
-  2 "Professional Occupations" ///
-  
-  3 "Associate Professional and Technical Occupations" ///
-  
-  4 "Administrative and Secretarial Occupations" ///
-  
-  5 "Skilled Trades Occupations" ///
-  
-  6 "Caring, Leisure and Other Service Occupations" ///
-  
-  7 "Sales and Customer Service Occupations" ///
-  
-  8 "Process, Plant and Machine Operatives" ///
-  
-  9 "Elementary Occupations", replace
-
-
-
-label values occup occup_lbl
-
-
-
-tab ethnic occup, row nofreq
-
+lfs_data %>%
+  mutate(
+    occup = factor(occup,
+                   levels = 1:9,
+                   labels = c(
+                     "Managers, Directors and Senior Officials",
+                     "Professional Occupations",
+                     "Associate Professional and Technical Occupations",
+                     "Administrative and Secretarial Occupations",
+                     "Skilled Trades Occupations",
+                     "Caring, Leisure and Other Service Occupations",
+                     "Sales and Customer Service Occupations",
+                     "Process, Plant and Machine Operatives",
+                     "Elementary Occupations"
+                   )
+    )
+  ) %>%
+  ggplot(aes(x = ethnic, fill = occup)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_brewer(palette = "Set3") +
+  labs(
+    title = "Occupation distribution by ethnicity",
+    x = "Ethnic group",
+    y = "Percentage",
+    fill = "Occupation"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
