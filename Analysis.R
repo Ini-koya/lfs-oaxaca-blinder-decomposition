@@ -36,6 +36,8 @@ output_charts <- "C:/Users/sndui/OneDrive/Dissertation/Dissertation project/4. O
 
 reg_output <- "C:/Users/sndui/OneDrive/Dissertation/Dissertation project/4. Output/regression results"
 
+counterfactual_output <- "C:/Users/sndui/OneDrive/Dissertation/Dissertation project/4. Output/Counterfactual output"
+
 # Load clean data
 lfs_data <- readRDS(file.path(clean_dir, "Clean.RDS"))
 
@@ -78,7 +80,7 @@ Model <- list()
 
 
 # ======================================================
-# 5. pooled and Pairwise regressions and Oaxaca decomposition
+# 5. Pooled and Pairwise regressions and Oaxaca decomposition
 # ======================================================
 
 # Pooled regression
@@ -158,6 +160,332 @@ rm(df_sub, model, oaxaca_result,pair_model)
 
 
 # ======================================================
+# 6. Counterfactual simulation analysis
+# ======================================================
+# Purpose:
+# To assess how much selected factors contribute to the wage gap by
+# estimating how the gap changes when group characteristics/coefficeints are equalised.
+
+# This approach complements the Oaxaca-Blinder decomposition
+# by providing a more intuitive measure of the contribution
+# of individual factors to wage differentials which 
+#the coefficient level
+
+# ------------------------------------------------------
+# 6.1.1  Setup
+# ------------------------------------------------------
+
+# Define reference ethnic groups for pairwise comparisons
+core_comparison_groups <- c( "black", "pakistani",
+  "bangladeshi","indian", "chinese")
+
+core_ref_groups <- c(  "indian", "chinese")
+
+counterfactual_model<- list()
+
+for(ref in core_ref_groups){
+  counterfactual_model[[ref]]<- list()
+  
+for (groups in core_comparison_groups) {
+  
+  counterfactual_model[[ref]][[groups]] <- list()
+}
+}
+
+# ------------------------------------------------------
+# 6.1.2 Calculate average characteristics by group
+# ------------------------------------------------------
+# For each ethnic group, calculate the mean value of each explanatory variable.
+# These group averages are used to construct counter factual wage predictions.
+
+# vars: vector of variable names
+# ethnic_groups: column in lfs_data identifying groups
+for(ref in core_ref_groups){
+for (group in core_comparison_groups) {
+  
+  means_x <- c()
+  
+  for (var in vars) {
+    
+    temp <- lfs_data %>%
+      filter(.data[[group]] == 1) %>%
+      summarise(
+        mean = mean(.data[[var]], na.rm = TRUE),
+        .groups = "drop"
+      ) %>%
+      pull(mean)
+    means_x[var] <- temp
+  }
+  
+  counterfactual_model[[ref]][[group]][["x"]] <- means_x
+}
+}
+# Clean up temporary objects(optional)
+rm(temp,means_x)
+
+
+# ------------------------------------------------------
+# 6.1.3 extract individual/pooled regression coefficients
+# ------------------------------------------------------
+# Use coefficients from the pooled wage regression as the common returns structure.
+# This ensures counterfactual differences reflect changes in characteristics,
+# rather than differences in estimated coefficients across groups.
+for(ref in core_ref_groups){
+for (groups in core_comparison_groups) {
+  
+  counterfactual_model[[ref]][[groups]][["pooled_coefficients"]] <- coef(Pooled_model)
+  
+  counterfactual_model[[ref]][[groups]][["individual_coefficients"]] <-
+    coef(individual_model[[groups]])
+}
+}
+
+
+
+# ------------------------------------------------------
+# 6.1.4. Calculate observed/counterfactual predicted wages (+results)
+# ------------------------------------------------------
+# Purpose:
+# Estimate how much of the predicted wage gap is driven by
+# differences in returns to each explanatory variable.
+#
+# For each variable:
+# - both groups' coefficients are replaced with the pooled coefficient
+# - characteristics are held fixed
+#
+# The resulting change in the predicted wage gap is interpreted
+# as the contribution of differences in returns to that variable.
+
+
+# Initialise empty dataframe to store counterfactual results
+counterfactual_results_coeff <- data.frame()
+
+# Loop through each reference group
+for (ref in core_ref_groups) {
+  
+  # Loop through each comparison group
+  for (group in core_comparison_groups) {
+    
+    # Skip comparison of group with itself
+    if (group == ref) next
+    
+    # --------------------------------------------------
+    # Extract coefficients and characteristics
+    # --------------------------------------------------
+    
+    # Group-specific coefficients
+    individual_comp <- counterfactual_model[[ref]][[group]][["individual_coefficients"]]
+    individual_ref  <- counterfactual_model[[ref]][[ref]][["individual_coefficients"]]
+    
+    # Pooled/common coefficients
+    pooled_coef <- counterfactual_model[[ref]][[group]][["pooled_coefficients"]]
+    
+    # Mean characteristics by group
+    x_comp <- counterfactual_model[[ref]][[group]][["x"]]
+    x_ref  <- counterfactual_model[[ref]][[ref]][["x"]]
+    
+    
+    # --------------------------------------------------
+    # Calculate baseline predicted wage gap
+    # --------------------------------------------------
+    # Predicted wages are calculated using:
+    # - group-specific coefficients
+    # - group-specific mean characteristics
+    
+    w_comp <- sum(individual_comp[vars] * x_comp[vars], na.rm = TRUE)
+    
+    w_ref <- sum(individual_ref[vars] * x_ref[vars], na.rm = TRUE)
+    
+    # Baseline predicted wage gap
+    baseline_gap <- w_ref - w_comp
+    
+    
+    # --------------------------------------------------
+    # Equalise one coefficient at a time
+    # --------------------------------------------------
+    
+    for (v in vars) {
+      
+      # Create copies of group-specific coefficients
+      cf_comp_coef <- individual_comp
+      cf_ref_coef  <- individual_ref
+      
+      # Replace coefficient for variable v with pooled coefficient
+      # for BOTH groups
+      cf_comp_coef[v] <- pooled_coef[v]
+      cf_ref_coef[v]  <- pooled_coef[v]
+      
+      
+      # --------------------------------------------------
+      # Calculate counterfactual predicted wage gap
+      # --------------------------------------------------
+      
+      w_comp_cf <- sum(
+        cf_comp_coef[vars] * x_comp[vars],
+        na.rm = TRUE
+      )
+      
+      w_ref_cf <- sum(
+        cf_ref_coef[vars] * x_ref[vars],
+        na.rm = TRUE
+      )
+      
+      # Counterfactual predicted wage gap
+      cf_gap <- w_ref_cf - w_comp_cf
+      
+      
+      # --------------------------------------------------
+      # Calculate contribution of variable
+      # --------------------------------------------------
+      # Measures how much the wage gap changes after
+      # equalising returns to variable v
+      
+      contribution <- baseline_gap - cf_gap
+      
+      # Contribution as percentage of baseline gap
+      contribution_share <- 100 * (contribution / baseline_gap)
+      
+      
+      # --------------------------------------------------
+      # Store results
+      # --------------------------------------------------
+      
+      temp <- data.frame(
+        reference_group = ref,
+        comparison_group = group,
+        variable = v,
+        observed_gap = baseline_gap,
+        counterfactual_gap = cf_gap,
+        contribution = contribution,
+        contribution_share = contribution_share
+      )
+      
+      # Append results to output table
+      counterfactual_results_coeff <- rbind(
+        counterfactual_results_coeff,
+        temp
+      )
+    }
+  }
+}
+
+
+
+# Initialise empty dataframe to store counterfactual results
+counterfactual_results_coeff <- data.frame()
+
+# Loop through each reference group
+for (ref in core_ref_groups) {
+  
+  # Loop through each comparison group
+  for (group in core_comparison_groups) {
+    
+    # Skip comparison of group with itself
+    if (group == ref) next
+    
+    # --------------------------------------------------
+    # Extract coefficients and characteristics
+    # --------------------------------------------------
+    
+    # Group-specific coefficients
+    individual_comp <- counterfactual_model[[ref]][[group]][["individual_coefficients"]]
+    individual_ref  <- counterfactual_model[[ref]][[ref]][["individual_coefficients"]]
+    
+    # Pooled/common coefficients
+    pooled_coef <- counterfactual_model[[ref]][[group]][["pooled_coefficients"]]
+    
+    # Mean characteristics by group
+    x_comp <- counterfactual_model[[ref]][[group]][["x"]]
+    x_ref  <- counterfactual_model[[ref]][[ref]][["x"]]
+    
+    
+    # --------------------------------------------------
+    # Calculate baseline predicted wage gap
+    # --------------------------------------------------
+    # Predicted wages are calculated using:
+    # - group-specific coefficients
+    # - group-specific mean characteristics
+    
+    w_comp <- sum(individual_comp[vars] * x_comp[vars], na.rm = TRUE)
+    
+    w_ref <- sum(individual_ref[vars] * x_ref[vars], na.rm = TRUE)
+    
+    # Baseline predicted wage gap
+    baseline_gap <- w_ref - w_comp
+    
+    
+    # --------------------------------------------------
+    # Equalise one coefficient at a time
+    # --------------------------------------------------
+    
+    for (v in vars) {
+      
+      # Create copies of group-specific coefficients
+      cf_comp_coef <- individual_comp
+      cf_ref_coef  <- individual_ref
+      
+      # Replace coefficient for variable v with pooled coefficient
+      # for BOTH groups
+      cf_comp_coef[v] <- pooled_coef[v]
+      cf_ref_coef[v]  <- pooled_coef[v]
+      
+      
+      # --------------------------------------------------
+      # Calculate counterfactual predicted wage gap
+      # --------------------------------------------------
+      
+      w_comp_cf <- sum(
+        cf_comp_coef[vars] * x_comp[vars],
+        na.rm = TRUE
+      )
+      
+      w_ref_cf <- sum(
+        cf_ref_coef[vars] * x_ref[vars],
+        na.rm = TRUE
+      )
+      
+      # Counterfactual predicted wage gap
+      cf_gap <- w_ref_cf - w_comp_cf
+      
+      
+      # --------------------------------------------------
+      # Calculate contribution of variable
+      # --------------------------------------------------
+      # Measures how much the wage gap changes after
+      # equalising returns to variable v
+      
+      contribution <- baseline_gap - cf_gap
+      
+      # Contribution as percentage of baseline gap
+      contribution_share <- 100 * (contribution / baseline_gap)
+      
+      
+      # --------------------------------------------------
+      # Store results
+      # --------------------------------------------------
+      
+      temp <- data.frame(
+        reference_group = ref,
+        comparison_group = group,
+        variable = v,
+        observed_gap = baseline_gap,
+        counterfactual_gap = cf_gap,
+        contribution = contribution,
+        contribution_share = contribution_share
+      )
+      
+      # Append results to output table
+      counterfactual_results_coeff <- rbind(
+        counterfactual_results_coeff,
+        temp
+      )
+    }
+  }
+}
+
+write_xlsx(counterfactual_results_coeff,file.path(counterfactual_output,"Coefficient_results.xlsx"))
+
+# ======================================================
 # 6. Export results
 # ======================================================
 
@@ -197,19 +525,19 @@ for (Rgroup in names(Model)) {
   for (group in names(Model[[Rgroup]])) {
     # Extract Oaxaca object
     ox <- Model[[Rgroup]][[group]][["oaxaca"]]
-
+    
     # --------------------
     # Aggregate results
     # --------------------
-
+    
     # Extract overall decomposition results using pooled weights
     overall <- ox$twofold$overall[3, ]
-
+    
     # Extract wage gap components
     gap <- ox$y$y.diff
     explained <- overall["coef(explained)"]
     unexplained <- overall["coef(unexplained)"]
-
+    
     # Store aggregate Oaxaca results
     temp_summary <- data.frame(
       reference_group = Rgroup,
@@ -222,28 +550,28 @@ for (Rgroup in names(Model)) {
       explained_share = explained / gap,
       unexplained_share = unexplained / gap
     )
-
+    
     oaxaca_summary <- rbind(oaxaca_summary, temp_summary)
-
-
+    
+    
     # --------------------
     # Coefficient-level results
     # --------------------
-
+    
     # Extract variable-level decomposition results using pooled weights
     var_coeff <- ox$twofold$variables[[3]]
-
+    
     # Convert matrix output into data frame
     var_coeff <- as.data.frame(var_coeff)
     var_coeff$Variable <- rownames(var_coeff)
-
+    
     # Add group identifiers and overall decomposition values
     var_coeff$Reference_group <- Rgroup
     var_coeff$Comparison_group <- group
     var_coeff$log_wage_gap <- gap
     var_coeff$explained <- explained
     var_coeff$unexplained <- unexplained
-
+    
     # Extract clean contribution columns
     temp_coeff <- data.frame(
       reference_group = var_coeff$Reference_group,
@@ -259,7 +587,7 @@ for (Rgroup in names(Model)) {
       total_explained = explained,
       total_unexplained = unexplained
     )
-
+    
     oaxaca_coefficients <- rbind(oaxaca_coefficients, temp_coeff)
   }
 }
@@ -272,208 +600,6 @@ write_xlsx(oaxaca_coefficients, file.path(reg_output, "Oaxaca_coef.xlsx"))
 
 # Clean up temporary objects(optional)
 rm(Rgroup, group, ox, overall, gap, explained, unexplained, temp_summary, var_coeff, temp_coeff, pair_model)
-
-
-
-# ======================================================
-# Counterfactual analysis
-# ======================================================
-# Purpose:
-# To assess how much selected factors contribute to the wage gap by
-# estimating how the gap changes when group characteristics are equalised.
-
-# This approach complements the Oaxaca-Blinder decomposition
-# by providing a more intuitive measure of the contribution
-# of individual factors to wage differentials which 
-#the coefficient level
-
-# Define reference ethnic groups for pairwise comparisons
-core_ethnic_groups <- c( "black", "indian", "pakistani",
-  "bangladeshi", "chinese")
-
-counterfactual_model<- list()
-
-for (groups in core_ethnic_groups) {
-  counterfactual_model[[groups]] <- list()
-}
-
-
-# ------------------------------------------------------
-# 1. Calculate average characteristics by group
-# ------------------------------------------------------
-# For each ethnic group, calculate the mean value of each explanatory variable.
-# These group averages are used to construct counter factual wage predictions.
-
-# vars: vector of variable names
-# ethnic_groups: column in lfs_data identifying groups
-for (group in core_ethnic_groups) {
-  
-  means_x <- c()
-  
-  for (var in vars) {
-    
-    temp <- lfs_data %>%
-      filter(.data[[group]] == 1) %>%
-      summarise(
-        mean = mean(.data[[var]], na.rm = TRUE),
-        .groups = "drop"
-      ) %>%
-      pull(mean)
-    
-    means_x[var] <- temp
-  }
-  
-  counterfactual_model[[group]][["x"]] <- means_x
-}
-
-# Clean up temporary objects(optional)
-rm(temp,means_x)
-
-
-# ------------------------------------------------------
-# 2. Generate individual/pooled regression coefficients
-# ------------------------------------------------------
-# Use coefficients from the pooled wage regression as the common returns structure.
-# This ensures counterfactual differences reflect changes in characteristics,
-# rather than differences in estimated coefficients across groups.
-
-for (groups in core_ethnic_groups) {
-  
-  counterfactual_model[[groups]][["pooled_coefficients"]] <- coef(Pooled_model)
-  
-  counterfactual_model[[groups]][["individual_coefficients"]] <-
-    coef(individual_model[[groups]])
-}
-
-
-# ------------------------------------------------------
-# 3. Construct counterfactual predictions
-# ------------------------------------------------------
-# For each reference-comparison pair, replace the comparison group’s average
-# characteristics with the reference group’s characteristics for selected variables
-# or factor groups.
-
-factor_groups <- list(
-  "Experience / human capital accumulation" = c("exper", "exper2", "tenure"),
-  "Education" = c("degree", "higher", "alevel", "gcse", "other"),
-  "Demographics / personal characteristics" = c("female", "marr", "bborn", "disabled", "dep19"),
-  "Job characteristics / occupation" = c(
-    "manager", "professional", "associate", "administrative",
-    "skilled", "caring", "sales", "elementary"
-  ),
-  "Location" = c("London"),
-  "Sector / firm characteristics" = c("public", "lcomp")
-)
-
-group_means <- lfs_data %>%
-  group_by(ethnic) %>%
-  summarise(
-    across(all_of(vars), ~ mean(.x, na.rm = TRUE)),
-    .groups = "drop"
-  )
-
-pooled_coef <- coef(Pooled_model)
-pooled_coef <- pooled_coef[names(pooled_coef) %in% vars]
-
-
-# ------------------------------------------------------
-# 4. Calculate counterfactual wage gaps
-# ------------------------------------------------------
-# For each replacement, calculate the predicted counterfactual wage gap.
-# This shows what the wage gap would be if the comparison group had the same
-# characteristics as the reference group for that factor.
-
-counterfactual_results <- data.frame()
-
-for (Rgroup in reference_groups) {
-  
-  for (group in ethnic_groups) {
-    
-    if (group != Rgroup) {
-      
-      ref_x <- group_means %>%
-        filter(ethnic == Rgroup) %>%
-        select(all_of(vars))
-      
-      comp_x <- group_means %>%
-        filter(ethnic == group) %>%
-        select(all_of(vars))
-      
-      ref_x <- as.numeric(ref_x[1, ])
-      comp_x <- as.numeric(comp_x[1, ])
-      
-      names(ref_x) <- vars
-      names(comp_x) <- vars
-      
-      ref_pred <- sum(ref_x[names(pooled_coef)] * pooled_coef)
-      comp_pred <- sum(comp_x[names(pooled_coef)] * pooled_coef)
-      
-      observed_gap <- ref_pred - comp_pred
-      
-      for (factor_name in names(factor_groups)) {
-        
-        factor_vars <- factor_groups[[factor_name]]
-        factor_vars <- factor_vars[factor_vars %in% names(pooled_coef)]
-        
-        comp_cf <- comp_x
-        comp_cf[factor_vars] <- ref_x[factor_vars]
-        
-        comp_cf_pred <- sum(comp_cf[names(pooled_coef)] * pooled_coef)
-        counterfactual_gap <- ref_pred - comp_cf_pred
-        
-        gap_change <- observed_gap - counterfactual_gap
-        pct_reduction <- gap_change / observed_gap
-        
-        temp <- data.frame(
-          Reference_group = Rgroup,
-          Comparison_group = group,
-          Factor = factor_name,
-          observed_gap = observed_gap,
-          counterfactual_gap = counterfactual_gap,
-          gap_change = gap_change,
-          pct_reduction = pct_reduction
-        )
-        
-        counterfactual_results <- rbind(counterfactual_results, temp)
-      }
-    }
-  }
-}
-
-# ------------------------------------------------------
-# 5. Estimate contribution of each factor
-# ------------------------------------------------------
-# Calculate the difference between:
-# - the observed/predicted wage gap
-# - the counterfactual wage gap
-#
-# A larger reduction in the gap indicates that the factor is more important
-# in explaining the wage difference.
-
-counterfactual_results <- counterfactual_results %>%
-  mutate(
-    Comparison = paste0(Reference_group, " vs ", Comparison_group),
-    observed_gap_pct = (exp(observed_gap) - 1) * 100,
-    counterfactual_gap_pct = (exp(counterfactual_gap) - 1) * 100,
-    gap_change_pct = (exp(gap_change) - 1) * 100,
-    pct_reduction = pct_reduction * 100
-  ) %>%
-  select(
-    Comparison,
-    Factor,
-    observed_gap,
-    counterfactual_gap,
-    gap_change,
-    observed_gap_pct,
-    counterfactual_gap_pct,
-    gap_change_pct,
-    pct_reduction
-  )
-
-
-
-
-
 
 
 
