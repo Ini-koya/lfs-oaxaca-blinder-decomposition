@@ -31,7 +31,7 @@ final_vars <- c(
   "FDPCH2", "FDPCH4", "FDPCH9", "FDPCH15", "FDPCH16", "FDPCH19",
   "MARDY6", "EDAGE", "PAIDHRU", "ETHUKEUL", "STATR", "GOVTOF2",
   "HIQUL15D", "HIQUL22D",
-  "year", "quarter"
+  "year", "quarter","ETHUK11", "FTPTWK"
 )
 
 

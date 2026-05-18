@@ -45,7 +45,7 @@ var_label(lfs_data$quarter) <- "Quarter of LFS study"
 # 11 = Wales, 12 = Scotland, 13 = Northern Ireland
 
 # Dropping missing / no answers: -8 = No answer, -9 = Not applicable
-lfs_data <- lfs_data %>% filter(GOVTOF2 > 0 & !is.na(GOVTOF2))
+lfs_data <- lfs_data %>% filter(!(GOVTOF2 %in% c(-8, -9)) & !is.na(GOVTOF2))
 
 # Generate London residency dummy variable
 lfs_data <- lfs_data %>%
@@ -71,7 +71,7 @@ lfs_data <- lfs_data %>% select(-GOVTOF2)
 # 9 = Other ethnic group, -8 = No answer, -9 = Not applicable
 
 # Dropping missing / no answers: -8 = No answer, -9 = Not applicable
-lfs_data <- lfs_data %>% filter(ETHUKEUL > 0 & !is.na(ETHUKEUL))
+lfs_data <- lfs_data %>% filter(!(ETHUKEUL %in% c(-8, -9)) & !is.na(ETHUKEUL))
 
 # Ethnicity named vector
 ethnic <- c(
@@ -133,7 +133,7 @@ lfs_data <- lfs_data %>% select(-ETHUKEUL)
 # 924 = Wales, 926 = UK/Britain (Did not know country)
 
 # Dropping missing / no answers: -8 = No answer, -9 = Not applicable
-lfs_data <- lfs_data %>% filter(CRY12 > 0 & !is.na(CRY12))
+lfs_data <- lfs_data %>% filter(!(CRY12 %in% c(-8, -9))& !is.na(CRY12))
 
 # Generate british-born dummy variable
 lfs_data <- lfs_data %>%
@@ -158,7 +158,7 @@ lfs_data <- lfs_data %>% select(-CRY12)
 # SEX[Sex of respondent (Values information: 1.0 = Male, 2.0 = Female)]
 
 # Dropping missing / no answers: -8 = No answer, -9 = Not applicable
-lfs_data <- lfs_data %>% filter(SEX > 0 & !is.na(SEX))
+lfs_data <- lfs_data %>% filter(!(SEX %in% c(-8, -9)) & !is.na(SEX))
 
 # Generate Female dummy variable (1: Female | 0: Male)
 lfs_data <- lfs_data %>%
@@ -179,7 +179,7 @@ lfs_data <- lfs_data %>% select(-SEX)
 # 1 = married/Cohabiting/Civil Partner, 2 = Non marr,
 
 # Dropping missing / no answers: -8 = No answer, -9 = Not applicable
-lfs_data <- lfs_data %>% filter(MARDY6 > 0 & !is.na(MARDY6))
+lfs_data <- lfs_data %>% filter(!(MARDY6 %in% c(-8, -9)) & !is.na(MARDY6))
 
 # Cleaning marriage variable
 lfs_data <- lfs_data %>%
@@ -220,9 +220,10 @@ lfs_data <- lfs_data %>% select(-MARDY6)
 # Dropping missing / no answers: -8 = No answer, -9 = Not applicable
 lfs_data <- lfs_data %>%
   filter(
-    (year < 2021 & SC10MMJ > 0 & !is.na(SC10MMJ)) |
-      (year >= 2021 & SC20MMJ > 0 & !is.na(SC20MMJ))
+    (year < 2021 & !(SC10MMJ %in% c(-8, -9)) & !is.na(SC10MMJ)) |
+      (year >= 2021 & !(SC20MMJ %in% c(-8, -9)) & !is.na(SC20MMJ))
   )
+
 
 # Generate aggregated occupation variable
 lfs_data <- lfs_data %>%
@@ -271,7 +272,7 @@ var_label(lfs_data$elementary) <- "Elementary Occupations"
 # 1 = Private, 2 = Public
 
 # Dropping missing / no answers: -8 = No answer, -9 = Not applicable
-lfs_data <- lfs_data %>% filter(PUBLICR > 0 & !is.na(PUBLICR))
+lfs_data <- lfs_data %>% filter(!(PUBLICR %in% c(-8, -9)) & !is.na(PUBLICR))
 
 # Generate public sector dummy variable
 lfs_data <- lfs_data %>%
@@ -313,7 +314,7 @@ lfs_data <- lfs_data %>%
 lfs_data <- lfs_data %>% select(-c(HIQUL15D, HIQUL22D))
 
 # Dropping missing / no answers: -8 = No answer, -9 = Not applicable, 7 = Don't know
-lfs_data <- lfs_data %>% filter(hqual > 0 & hqual != 7 & !is.na(hqual))
+lfs_data <- lfs_data %>% filter(!(hqual %in% c(-8, -9)) & hqual != 7 & !is.na(hqual))
 
 # Generate qualification dummy variables
 lfs_data <- lfs_data %>%
@@ -346,15 +347,22 @@ var_label(lfs_data$none) <- "No qualification"
 
 # Dropping missing / no answers: -8 = No answer, -9 = Not applicable
 lfs_data <- lfs_data %>%
-  filter(EDAGE >= 0 & EDAGE <= 95 & !is.na(EDAGE))
+  filter(!(EDAGE %in% c(-8, -9)) & EDAGE != 96 & !is.na(EDAGE))
 
 # Label variable
 var_label(lfs_data$EDAGE) <- "Age when completed full-time education"
 
-# Mincer style experience proxy age minus years of education(age finished schooling minus preschool years)
+# Mincer style experience proxy age minus years of education(age finished schooling)
 # Generate years of education
 
-lfs_data <- lfs_data %>% mutate(exper = AGE - EDAGE - 5)
+lfs_data <- lfs_data %>%
+  mutate(
+    exper = case_when(
+      EDAGE != 97 ~ AGE - EDAGE,      # normal case
+      EDAGE == 97 ~ AGE - 18          # “never had education”
+    )
+  )
+
 
 lfs_data <- lfs_data %>%
   filter(exper >= 0)
@@ -380,7 +388,7 @@ lfs_data <- lfs_data %>% select(-EDAGE)
 
 # Drop invalid values for hours and wages
 lfs_data <- lfs_data %>%
-  filter(GRSSWK > 0 & PAIDHRU > 0)
+  filter(!(GRSSWK = -8) & !(PAIDHRU = -8))
 
 # Generate hourly wage variable
 lfs_data <- lfs_data %>%
@@ -467,7 +475,7 @@ lfs_data <- lfs_data %>% select(-c(BUSHR, POTHR, quarter_str, YearQuarter))
 
 # Drop invalid values for hours and wages
 lfs_data <- lfs_data %>%
-  filter(MPNR02 > 0 & MPNR02 > 0)
+  filter(!(MPNR02 %in% c(-8, -9)))
 
 # Creating large/medium company dummy variable: defined as above 250 and above as medium/large
 lfs_data <- lfs_data %>%
@@ -491,7 +499,7 @@ lfs_data <- lfs_data %>% select(-c(MPNR02))
 # 1 = Equality Act Disabled, 2 = Not Equality Act Disabled
 
 # Dropping missing / no answers: -8 = No answer, -9 = Not applicable
-lfs_data <- lfs_data %>% filter(DISEA > 0 & !is.na(DISEA))
+lfs_data <- lfs_data %>% filter(!(DISEA %in% c(-8, -9)) & !is.na(DISEA))
 
 
 # Generate disability dummy variable
@@ -521,7 +529,7 @@ lfs_data <- lfs_data %>% select(-DISEA)
 # EMPMON - Length of time continuously employed (including self-employed)
 
 # Dropping missing / no answers: -8 = No answer, -9 = Not applicable
-lfs_data <- lfs_data %>% filter(EMPMON > 0 & !is.na(EMPMON) & EMPMON >= 0)
+lfs_data <- lfs_data %>% filter(!(EMPMON %in% c(-8, -9)) & !is.na(EMPMON))
 
 # Generate tenure variable
 
@@ -567,6 +575,34 @@ var_label(lfs_data$age) <- "Age"
 # Drop original LFS variable
 lfs_data <- lfs_data %>% select(-AGE)
 
+# Filter for age above 18#
+lfs_data <- lfs_data %>% filter(age>=18)
+# ========================================
+# Employment status
+# ========================================
+
+#ILODEFR - Basic economic activity (ILO definition) (reported)  
+#(1)In employment  
+#(2)ILO unemployed  
+#(3)Inactive  
+#(4)Under 16 
+
+# Generate  variable
+
+lfs_data <- lfs_data %>%
+  mutate(employed = case_when(
+    ILODEFR == 1 ~ 1,
+    ILODEFR == 2 ~ 0
+  )) %>%
+  filter(!is.na(ILODEFR)) %>%
+  filter(ILODEFR %in% c(1, 2))
+
+
+# Label age variable
+var_label(lfs_data$employed) <- "Employed:1 or Unemployed:0"
+
+# Drop original LFS variable
+lfs_data <- lfs_data %>% select(-ILODEFR)
 
 # ===============================================================================
 # IV. Keep and order final variables
@@ -575,12 +611,12 @@ lfs_data <- lfs_data %>% select(-AGE)
 # Keep only required variables
 lfs_data <- lfs_data %>%
   select(
-    year, quarter, age, CASENOP, disabled, tenure, dep19, ILODEFR, London,
+    year, quarter, age, CASENOP, disabled, tenure, dep19, London,
     white, black, mixed, indian, pakistani, bangladeshi, chinese, ethnic,
     bborn, female, marr, manager, professional, associate, administrative,
     skilled, caring, sales, operative, elementary, public,
     degree, higher, alevel, gcse, other, none,
-    exper, realhrpay, hrpay, loghrp, lcomp, Index, occup
+    exper, realhrpay, hrpay, loghrp, lcomp, Index, occup,employed
   )
 
 # All variables — assert no missing values
@@ -590,7 +626,7 @@ core_var <- c(
   "bborn", "female", "marr", "manager", "professional", "associate", "administrative",
   "skilled", "caring", "sales", "operative", "elementary", "public",
   "degree", "higher", "alevel", "gcse", "other", "none",
-  "exper", "realhrpay", "hrpay", "lcomp", "Index", "occup"
+  "exper", "realhrpay", "hrpay", "lcomp", "Index", "occup","employed"
 )
 
 for (var in core_var) {
@@ -607,6 +643,11 @@ continuous_var <- c(
 for (var in core_var) {
   stopifnot(all(lfs_data[[var]] >= 0))
 }
+
+summary(lfs_data)
+
+table(lfs_data$employed)
+table(lfs_data$ethnic)
 
 
 # ========================================
