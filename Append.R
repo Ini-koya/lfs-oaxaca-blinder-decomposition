@@ -1,5 +1,6 @@
 #Library packages
 library(tidyverse)
+library(haven)
 
 
 # ========================================
@@ -58,22 +59,11 @@ files_list <- list()
 # lfsp_jm15_eul.dta ... lfsp_jm24_eul.dta etc.
 # ==========================================================================
 
-for (q in names(quarters)) {
-  
-  temp <- paste0(
-    "lfsp_", q,                # quarter prefix (jm/aj/js/od)
-    sprintf("%02d", 15:24),    # year suffix (2015–2024 as 15–24)
-    "_eul.dta"                 # file extension
-  )
-  
-  # Append generated filenames to full file list
-  files_list <- c(files_list, temp)
-}
-
-
-# Remove known missing file to prevent read error
-files_list <- files_list[files_list != "lfsp_od24_eul.dta"]
-
+files_list <- list.files(
+  path = raw_dir,
+  pattern = "lfsp_",
+  full.names = TRUE
+)
 
 # ========================================
 # Extracting / cleaning files

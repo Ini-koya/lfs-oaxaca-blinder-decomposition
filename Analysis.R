@@ -24,7 +24,7 @@ library(oaxaca)
 library(dreamerr)
 library(fixest)
 library(leaps)
-
+library(sampleSelection)
 
 # ====================
 # 2. Paths and data
@@ -50,14 +50,25 @@ lfs_data <- readRDS(file.path(clean_dir, "Clean.RDS"))
 lfs_data <- lfs_data %>%
   mutate(exper2 = exper^2)
 
+lfs_data <- lfs_data %>%
+  mutate(age2 = age^2)
 
 # ======================================================
 # 4. Model setup
 # ======================================================
 
-# Define list of control variables used in all regressions
+# Define list of control variables used in all core regressions
 vars <- c(
-  "exper", "exper2", "female", "marr", "bborn", "disabled",
+  "exper", "exper2", "female",  "bborn", "disabled",
+  "tenure", "London", "public",
+  "degree", "higher", "alevel", "gcse", "other",
+  "manager", "professional", "associate", "administrative",
+  "skilled", "caring", "sales", "elementary", "lcomp"
+)
+
+# Define list of control variables used in probit regression for Heckman correction
+vars_IMR <- c(
+  "age2", "female", "marr", "bborn", "disabled",
   "tenure", "dep19", "London", "public",
   "degree", "higher", "alevel", "gcse", "other",
   "manager", "professional", "associate", "administrative",
@@ -66,6 +77,13 @@ vars <- c(
 
 # Convert vector of variables into regression formula string
 regressors <- paste(vars, collapse = " + ")
+
+
+
+# Convert vector of variables into regression formula string(Heckman correction)
+regressors_IMR <- paste(vars_IMR, collapse = " + ")
+
+
 
 # Define reference ethnic groups for pairwise comparisons
 reference_groups <- c("white", "indian", "chinese")
@@ -84,7 +102,9 @@ Model <- list()
 # 5. Pooled and Pairwise regressions and Oaxaca decomposition
 # ======================================================
 
-# Pooled regression
+#----------------------
+# A. Pooled regression
+#----------------------
 
 # Run OLS regression with year fixed effects
 Pooled_model <- feols(
@@ -94,7 +114,9 @@ Pooled_model <- feols(
 
 individual_model <- list()
 
-#individual regressions
+#------------------------------------
+# B. Individual etnicity regressions
+#------------------------------------
 for (group in ethnic_groups) {
   
   # Subset data to include only the group of interest
@@ -112,6 +134,10 @@ for (group in ethnic_groups) {
 }
 
 rm(df_sub)
+
+#----------------------------------------------------------------
+# C. Main analysis(Pairwise regressions,OAXCA, heckman correction)
+#----------------------------------------------------------------
 
 # Loop over each reference group
 for (Rgroup in reference_groups) {
@@ -133,12 +159,22 @@ for (Rgroup in reference_groups) {
         data = df_sub,
         data.save = TRUE
       )
+      
+      # Estimate the Heckman model and extract the inverse miller ratio(IMR)
+      heck <- heckit(
+      selection =  as.formula(paste("employed ~",regressors_IMR, "+ factor(year)")),     # selection equation
+      outcome   =  as.formula(paste("loghrp ~", regressors, "+ factor(year)")),     # wage equation
+      data      = df_sub)
+      
+      
+      # Store IMR in subset data
+      df_sub$IMR <- heck$invMills
 
       # Run Oaxaca-Blinder decomposition
       # Outcome: log hourly pay
       # Group variable: current comparison group
       oaxaca_result <- oaxaca(
-        as.formula(paste("loghrp ~", regressors, "|", group)),
+        as.formula(paste("loghrp ~", regressors,"+ IMR", "|", group)),
         data = df_sub,
         R = NULL
       )
@@ -159,256 +195,6 @@ rm(df_sub, model, oaxaca_result,pair_model)
 
 
 
-# ======================================================
-# 6. Counterfactual simulation analysis
-# ======================================================
-# Purpose:
-# To assess how much selected factors contribute to the wage gap by
-# estimating how the gap changes when group characteristics/coefficeints are equalised.
-
-# This approach complements the Oaxaca-Blinder decomposition
-# by providing a more intuitive measure of the contribution
-# of individual factors to wage differentials which 
-#the coefficient level
-
-# ------------------------------------------------------
-# 6.1.1  Setup
-# ------------------------------------------------------
-
-# Define reference ethnic groups for pairwise comparisons
-core_comparison_groups <- c( "black", "pakistani",
-  "bangladeshi","indian", "chinese")
-
-core_ref_groups <- c(  "indian", "chinese")
-
-counterfactual_model<- list()
-
-for(ref in core_ref_groups){
-  counterfactual_model[[ref]]<- list()
-  
-for (groups in core_comparison_groups) {
-  
-  counterfactual_model[[ref]][[groups]] <- list()
-}
-}
-
-# ------------------------------------------------------
-# 6.1.2 Calculate average characteristics by group
-# ------------------------------------------------------
-# For each ethnic group, calculate the mean value of each explanatory variable.
-# These group averages are used to construct counter factual wage predictions.
-
-# vars: vector of variable names
-# ethnic_groups: column in lfs_data identifying groups
-for(ref in core_ref_groups){
-for (group in core_comparison_groups) {
-  
-  means_x <- c()
-  
-  for (var in vars) {
-    
-    temp <- lfs_data %>%
-      filter(.data[[group]] == 1) %>%
-      summarise(
-        mean = mean(.data[[var]], na.rm = TRUE),
-        .groups = "drop"
-      ) %>%
-      pull(mean)
-    means_x[var] <- temp
-  }
-  
-  counterfactual_model[[ref]][[group]][["x"]] <- means_x
-}
-}
-# Clean up temporary objects(optional)
-rm(temp,means_x)
-
-
-# ------------------------------------------------------
-# 6.1.3 Extract individual / pairwise pooled regression coefficients
-# ------------------------------------------------------
-
-for (ref in core_ref_groups) {
-  
-  for (group in core_comparison_groups) {
-    
-    
-    # Pairwise pooled coefficients from the stored pairwise regression
-    counterfactual_model[[ref]][[group]][["pooled_coefficients"]] <-
-      coef(Model[[ref]][[group]][["regression"]])
-    
-    # Comparison group-specific coefficients
-    counterfactual_model[[ref]][[group]][["individual_coefficients"]] <-
-      coef(individual_model[[group]])
-  }
-  
-  # Also store reference group-specific coefficients and characteristics
-  counterfactual_model[[ref]][[ref]][["individual_coefficients"]] <-
-    coef(individual_model[[ref]])
-}
-}
-# ======================================================
-# 6.1.4 Counterfactual analysis
-# ======================================================
-# For each variable:
-# - replace both groups' coefficients with the pooled coefficient
-# - keep characteristics fixed
-# This captures the role of differences in returns
-# ------------------------------------------------------
-# A. Coefficient / returns counterfactual
-# ------------------------------------------------------
-
-counterfactual_results_coeff <- data.frame()
-
-for (ref in core_ref_groups) {
-  
-  for (group in core_comparison_groups) {
-    
-    if (group == ref) next
-    
-    individual_comp <- counterfactual_model[[ref]][[group]][["individual_coefficients"]]
-    individual_ref  <- counterfactual_model[[ref]][[ref]][["individual_coefficients"]]
-    pooled_coef     <- counterfactual_model[[ref]][[group]][["pooled_coefficients"]]
-    
-    x_comp <- counterfactual_model[[ref]][[group]][["x"]]
-    x_ref  <- counterfactual_model[[ref]][[ref]][["x"]]
-    
-    common_vars <- intersect(
-      intersect(names(individual_comp), names(individual_ref)),
-      intersect(names(pooled_coef), names(x_comp))
-    )
-    
-    common_vars <- intersect(common_vars, names(x_ref))
-    common_vars <- intersect(common_vars, vars)
-    
-    w_comp <- sum(individual_comp[common_vars] * x_comp[common_vars], na.rm = TRUE)
-    w_ref  <- sum(individual_ref[common_vars]  * x_ref[common_vars], na.rm = TRUE)
-    
-    baseline_gap <- w_ref - w_comp
-    
-    for (v in common_vars) {
-      
-      cf_comp_coef <- individual_comp
-      cf_ref_coef  <- individual_ref
-      
-      cf_comp_coef[v] <- pooled_coef[v]
-      cf_ref_coef[v]  <- pooled_coef[v]
-      
-      w_comp_cf <- sum(cf_comp_coef[common_vars] * x_comp[common_vars], na.rm = TRUE)
-      w_ref_cf  <- sum(cf_ref_coef[common_vars]  * x_ref[common_vars], na.rm = TRUE)
-      
-      cf_gap <- w_ref_cf - w_comp_cf
-      
-      contribution <- baseline_gap - cf_gap
-      contribution_share <- 100 * contribution / baseline_gap
-      
-      temp <- data.frame(
-        reference_group = ref,
-        comparison_group = group,
-        channel = "returns_coefficients",
-        variable = v,
-        Pooled_coefficient= pooled_coef[v],
-        observed_gap = baseline_gap,
-        counterfactual_gap = cf_gap,
-        contribution = contribution,
-        contribution_share = contribution_share
-      
-      )
-      
-      counterfactual_results_coeff <- rbind(counterfactual_results_coeff, temp)
-    }
-  }
-}
-
-
-# ------------------------------------------------------
-# B. Characteristics / expected X counterfactual
-# ------------------------------------------------------
-# For each variable:
-# - replace the comparison group's average characteristic
-#   with the reference group's average characteristic
-# - keep coefficients fixed
-# This captures the role of differences in characteristics.
-
-counterfactual_results_x <- data.frame()
-
-for (ref in core_ref_groups) {
-  
-  for (group in core_comparison_groups) {
-    
-    if (group == ref) next
-    
-    individual_comp <- counterfactual_model[[ref]][[group]][["individual_coefficients"]]
-    individual_ref  <- counterfactual_model[[ref]][[ref]][["individual_coefficients"]]
-    
-    x_comp <- counterfactual_model[[ref]][[group]][["x"]]
-    x_ref  <- counterfactual_model[[ref]][[ref]][["x"]]
-    
-    common_vars <- intersect(
-      intersect(names(individual_comp), names(individual_ref)),
-      intersect(names(x_comp), names(x_ref))
-    )
-    
-    common_vars <- intersect(common_vars, vars)
-    
-    w_comp <- sum(individual_comp[common_vars] * x_comp[common_vars], na.rm = TRUE)
-    w_ref  <- sum(individual_ref[common_vars]  * x_ref[common_vars], na.rm = TRUE)
-    
-    baseline_gap <- w_ref - w_comp
-    
-    for (v in common_vars) {
-      
-      x_comp_cf <- x_comp
-      x_comp_cf[v] <- x_ref[v]
-      
-      w_comp_cf <- sum(individual_comp[common_vars] * x_comp_cf[common_vars], na.rm = TRUE)
-      w_ref_cf  <- w_ref
-      
-      cf_gap <- w_ref_cf - w_comp_cf
-      
-      contribution <- baseline_gap - cf_gap
-      contribution_share <- 100 * contribution / baseline_gap
-      
-      temp <- data.frame(
-        reference_group = ref,
-        comparison_group = group,
-        channel = "characteristics_expected_x",
-        variable = v,
-        observed_gap = baseline_gap,
-        counterfactual_gap = cf_gap,
-        contribution = contribution,
-        contribution_share = contribution_share
-      )
-      
-      counterfactual_results_x <- rbind(counterfactual_results_x, temp)
-    }
-  }
-}
-
-
-# ------------------------------------------------------
-# C. Combine and export
-# ------------------------------------------------------
-
-counterfactual_results_all <- rbind(
-  counterfactual_results_coeff,
-  counterfactual_results_x
-)
-
-write_xlsx(
-  counterfactual_results_coeff,
-  file.path(counterfactual_output, "Coefficient_results.xlsx")
-)
-
-write_xlsx(
-  counterfactual_results_x,
-  file.path(counterfactual_output, "Characteristics_results.xlsx")
-)
-
-write_xlsx(
-  counterfactual_results_all,
-  file.path(counterfactual_output, "Counterfactual_results_all.xlsx")
-)
 # ======================================================
 # 6. Export results
 # ======================================================
