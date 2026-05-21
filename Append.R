@@ -32,7 +32,7 @@ final_vars <- c(
   "FDPCH2", "FDPCH4", "FDPCH9", "FDPCH15", "FDPCH16", "FDPCH19",
   "MARDY6", "EDAGE", "PAIDHRU", "ETHUKEUL", "STATR", "GOVTOF2",
   "HIQUL15D", "HIQUL22D",
-  "year", "quarter","ETHUK11", "FTPTWK"
+  "year", "quarter","ETHUK11", "FTPTWK", "CRY01", "DISCURR"
 )
 
 
@@ -70,22 +70,27 @@ files_list <- list.files(
 # ========================================
 # Loop through each file, import dataset, select variables, and save as RDS
 
-for (i in files_list) {
-  
-  data <- read_dta(file.path(raw_dir, i)) %>%  # read LFS Stata file
-    select(any_of(final_vars)) %>%             # keep only required variables
-    mutate(
-      year = paste0("20", substr(i, 8, 9)),    # extract year from filename
-      quarter = quarters[[q]]                  # assign quarter value
-    )
+  for (i in files_list) {
+    
+    fname <- basename(i)
+    
+    q <- substr(fname, 6, 7)
+    yr <- substr(fname, 8, 9)
+    
+    data <- read_dta(i) %>%           # read LFS Stata file
+      select(any_of(final_vars)) %>%  # keep only required variables
+      mutate(
+        year = paste0("20", yr),      # extract year from filename
+        quarter = quarters[[q]]        # assign quarter value
+      )
   
   # Save cleaned dataset as RDS file in modified directory
   saveRDS(
     data,
-    file.path(mod_dir, paste0(substr(i, 1, 13), "_mod.rds"))
+    file.path(mod_dir, paste0(fname, "_mod.rds"))
   )
-}
 
+}
 
 # ========================================
 # Appending dataset
