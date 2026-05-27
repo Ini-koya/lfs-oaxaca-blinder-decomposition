@@ -49,12 +49,12 @@ table(lfs_data$ILODEFR, useNA = "always")
 
 # Generate employed dummy variable (Employed:1 or Unemployed:0)
 lfs_data <- lfs_data %>%
+  filter(ILODEFR %in% c(1, 2)) %>% # Only observations that employed or unemployed are required for this analysis
+  filter(!is.na(ILODEFR))  %>%     # remove missing values
   mutate(employed = case_when(
-    ILODEFR == 1 ~ 1,
-    ILODEFR == 2 ~ 0
-  )) %>%
-  filter(!is.na(ILODEFR)) %>% # remove missing values
-  filter(ILODEFR %in% c(1, 2)) # Only observations that employed or unemployed are required for this analysis
+    ILODEFR == 1 ~ 1,              #  Employed: 1
+    ILODEFR == 2 ~ 0               #  Unemployed: 0
+  )) 
 
 # Label age variable
 var_label(lfs_data$employed) <- "Employed:1 or Unemployed:0"
@@ -209,11 +209,13 @@ table(lfs_data$CRY12, useNA = "always")
 table(lfs_data$CRY01, useNA = "always")
 
 # Dropping missing / no answers: -8 = No answer, -9 = Not applicable
-# Whether an individual is born in the Uk or not is a key characteristic
-# required for all observations included in the analysis.
-lfs_data <- lfs_data %>%
-  filter(!(CRY12 %in% c(-8, -9) & CRY01 %in% c(-8, -9)))
-
+# Country of birth is a required characteristic for all observations. 
+# Observations are only excluded where both CRY12 and CRY01 are simultaneously 
+# invalid, observations are kept where at least one variable carries a valid value.
+lfs_data <- lfs_data %>% filter(!(
+    (CRY12 %in% c(-8, -9) | is.na(CRY12)) & 
+    (CRY01 %in% c(-8, -9) | is.na(CRY01))
+  ))
 # Generate british-born dummy variable
 lfs_data <- lfs_data %>%
   mutate(
@@ -243,7 +245,6 @@ table(lfs_data$bborn, useNA = "always")
 # Tabulate original variable
 table(lfs_data$SEX, useNA = "always")
 
-
 # Dropping missing / no answers: -8 = No answer, -9 = Not applicable
 # Gender is a key characteristic required for all observations included in the analysis.
 lfs_data <- lfs_data %>% filter(!(SEX %in% c(-8, -9)) & !is.na(SEX))
@@ -269,7 +270,7 @@ table(lfs_data$female, useNA = "always")
 # ======================================
 # Original LFS description:
 # MARDY6 - married/Co-habiting/Civil Partners
-# 1 = married/Cohabiting/Civil Partner, 2 = Non marr,
+# 1 = married/Cohabiting/Civil Partner, 2 = Non married,
 
 # Tabulate original variable
 table(lfs_data$MARDY6, useNA = "always")
@@ -321,7 +322,6 @@ table(lfs_data$marr, useNA = "always")
 table(lfs_data$SC10MMJ, useNA = "always")
 table(lfs_data$SC20MMJ, useNA = "always")
 
-
 # Generate aggregated occupation variable
 lfs_data <- lfs_data %>%
   mutate(
@@ -331,9 +331,9 @@ lfs_data <- lfs_data %>%
     )
   ) %>%
   # Labour-related variables:
-  # observations with "No answer" or "Not applicable" are removed for employed individuals,
+  # Observations with "No answer" or "Not applicable" are removed for employed individuals,
   # while unemployed individuals are retained and these values are recoded as NA.
-  filter(!(employed == 1 & occup %in% c(-8, -9))) %>%
+  filter(!(employed == 1 & (occup %in% c(-8, -9) | is.na(occup)))) %>%
   mutate(occup = if_else(occup %in% c(-8, -9), NA_real_, as.numeric(occup)))
 
 # Drop original LFS variable
@@ -387,6 +387,10 @@ var_label(lfs_data$elementary) <- "Elementary Occupations"
 # Tabulate new variable
 table(lfs_data$occup, useNA = "always")
 
+# Unemployed individuals with a valid occupation code likely reflect their most recent sector
+# of employment — this is not considered problematic (384 observations)
+table(lfs_data$employed == 0 & !is.na(lfs_data$occup))
+
 # ===============================
 # Public/private sector dummy
 # ===============================
@@ -397,21 +401,19 @@ table(lfs_data$occup, useNA = "always")
 # Tabulate original variable
 table(lfs_data$PUBLICR, useNA = "always")
 
-
 # Generate public sector dummy variable
 lfs_data <- lfs_data %>%
   mutate(
     public = case_when(
       PUBLICR == 2 ~ 1, # Public sector
       PUBLICR == 1 ~ 0, # Private sector
-
-      # Labour-related variables:
-      # observations with "No answer" or "Not applicable" are removed for employed individuals,
-      # while unemployed individuals are retained and these values are recoded as NA.
       TRUE ~ PUBLICR
-    )
-  ) %>%
-  filter(!(employed == 1 & public %in% c(-8, -9))) %>%
+    ))
+  
+  # Labour-related variables:
+  # observations with "No answer" or "Not applicable" are removed for employed individuals,
+  # while unemployed individuals are retained and these values are recoded as NA.
+  lfs_data <- lfs_data %>% filter(!(employed == 1 & public %in% c(-8, -9))) %>%
   mutate(public = if_else(public %in% c(-8, -9), NA_real_, as.numeric(public)))
 
 # Label public sector variable
@@ -422,7 +424,6 @@ lfs_data <- lfs_data %>% select(-PUBLICR)
 
 # Tabulate original variable
 table(lfs_data$public, useNA = "always")
-
 
 # ========================================
 # Highest qualification dummy variables (1/0)
@@ -435,8 +436,8 @@ table(lfs_data$public, useNA = "always")
 # Dropping missing / no answers: -8 = No answer, -9 = Not applicable, 7 = Don't know
 
 # Tabulate original variable
-table(lfs_data$HIQUL15D)
-table(lfs_data$HIQUL22D)
+table(lfs_data$HIQUL15D, useNA = "always")
+table(lfs_data$HIQUL22D, useNA = "always")
 
 
 # Combine HIQUL15D and HIQUL22D into single variable
@@ -452,10 +453,8 @@ lfs_data <- lfs_data %>%
 lfs_data <- lfs_data %>% select(-c(HIQUL15D, HIQUL22D))
 
 # Dropping missing / no answers: -8 = No answer, -9 = Not applicable, 7 = Don't know
-# -9 = Not applicable, can occur as a  result of immigration status among other reasons so kept
 lfs_data <- lfs_data %>%
-  filter(!(hqual %in% -8) & hqual != 7 & !is.na(hqual)) %>%
-  mutate(hqual = case_when(hqual == -9 ~ NA_real_, TRUE ~ hqual))
+  filter(!(hqual %in% c(-8, -9, 7))  & !is.na(hqual))
 
 
 # Generate qualification dummy variables
@@ -508,12 +507,12 @@ table(lfs_data$qualification, useNA = "always")
 
 # Tabulate original variable
 table(lfs_data$EDAGE, useNA = "always")
+table(lfs_data$AGE, useNA = "always")
 
-# Dropping missing / no answers: -8 = No answer
-# -9 = "Not applicable" is retained, as this may arise from immigration-related differences
-# in educational systems or alternative forms of education not captured by the survey.
+# Dropping missing / no answers: -8 = No answer, -9 = Not applicable
+# Still in education (96) excluded as experience proxy is not applicable
 lfs_data <- lfs_data %>%
-  filter(!(EDAGE %in% -8) & EDAGE != 96 & !is.na(EDAGE))
+  filter(!(EDAGE %in% c(-8, -9, 96)) & !is.na(EDAGE))
 
 # Label variable
 var_label(lfs_data$EDAGE) <- "Age when completed full-time education"
@@ -525,12 +524,11 @@ lfs_data <- lfs_data %>%
   mutate(
     exper = case_when(
       EDAGE != 97 ~ AGE - EDAGE, # normal case
-      EDAGE == 97 ~ AGE - 18, # “never had education”
-      EDAGE == -9 ~ AGE - 18 # "Not applicable"
+      EDAGE == 97 ~ AGE - 18,    # "never had education"
     )
   )
 
-
+# Ensure positive experience
 lfs_data <- lfs_data %>%
   filter(exper >= 0)
 
@@ -557,7 +555,7 @@ table(lfs_data$exper, useNA = "always")
 # Tabulate original variable
 table(lfs_data$FTPTWK, useNA = "always")
 
-
+# Full-time dummy vairable( Full-time:1 & part-time:0)
 lfs_data <- lfs_data %>%
   mutate(
     Full_time = case_when(
@@ -579,6 +577,11 @@ var_label(lfs_data$Full_time) <- "Full-time:1 or Part-time/other:0"
 # Tabulate new variable
 table(lfs_data$Full_time, useNA = "always")
 
+# Unemployed individuals with a valid full-time/part-time code likely reflect their most 
+# recent employment status — this is not considered problematic
+table(lfs_data$employed == 0 & is.na(lfs_data$Full_time))
+table(lfs_data$employed == 0 & !is.na(lfs_data$Full_time))
+
 # ===============================
 #  Hourly wages
 # ===============================
@@ -590,19 +593,19 @@ table(lfs_data$Full_time, useNA = "always")
 # -8 = No answer, -9 = Not applicable
 
 # Tabulate original variable
-table(lfs_data$PAIDHRU)
-table(lfs_data$GRSSWK)
+table(lfs_data$PAIDHRU, useNA = "always")
+table(lfs_data$GRSSWK, useNA = "always")
 
-# Dropping missing / no answers: -8 = No answer, -9 = Not applicable
+
 # Labour-related variables:
+# Dropping missing / no answers: -8 = No answer, -9 = Not applicable
 # observations with "No answer" or "Not applicable" are removed for employed individuals,
 # while unemployed individuals are retained and these values are recoded as NA.
 lfs_data <- lfs_data %>%
-  filter(!(employed == 1 & PAIDHRU %in% c(-8, -9))) %>%
-  mutate(PAIDHRU = if_else(PAIDHRU %in% c(-8, -9), NA_real_, as.numeric(PAIDHRU))) %>%
-  filter(!(employed == 1 & GRSSWK %in% c(-8, -9))) %>%
-  mutate(GRSSWK = if_else(GRSSWK %in% c(-8, -9), NA_real_, as.numeric(GRSSWK)))
-
+  filter(!(employed == 1 & (PAIDHRU %in% c(-8, -9) | is.na(PAIDHRU)))) %>% # Employed treatment
+  mutate(PAIDHRU = if_else(PAIDHRU %in% c(-8, -9), NA_real_, as.numeric(PAIDHRU))) %>% # Unemployed treatment
+  filter(!(employed == 1 & (GRSSWK %in% c(-8, -9) | is.na(GRSSWK)))) %>% # Employed treatment 
+  mutate(GRSSWK = if_else(GRSSWK %in% c(-8, -9), NA_real_, as.numeric(GRSSWK))) # Unemployed treatment
 
 # Generate hourly wage variable
 lfs_data <- lfs_data %>%
@@ -680,6 +683,8 @@ lfs_data <- lfs_data %>% select(-c(BUSHR, POTHR, quarter_str, YearQuarter))
 
 # Tabulate new variable
 table(lfs_data$realhrpay, useNA = "always")
+table(lfs_data$loghrp, useNA = "always")
+
 
 # ===============================
 # Company size dummy variable
@@ -712,9 +717,13 @@ lfs_data <- lfs_data %>%
       MPNR02 %in% c(7, 8, 9) ~ 1,
       MPNR02 %in% c(1, 2, 3, 4, 5, 6) ~ 0,
       TRUE ~ MPNR02
-    )
-  ) %>%
-  filter(!(employed == 1 & lcomp %in% c(-8, -9))) %>%
+    ))
+  
+  # Labour-related variables:
+  # Dropping missing / no answers: -8 = No answer, -9 = Not applicable
+  # observations with "No answer" or "Not applicable" are removed for employed individuals,
+  # while unemployed individuals are retained and these values are recoded as NA.
+  lfs_data <- lfs_data %>%  filter(!(employed == 1 & lcomp %in% c(-8, -9))) %>%
   mutate(lcomp = if_else(lcomp %in% c(-8, -9), NA_real_, as.numeric(lcomp)))
 
 # Label comapny size variable
@@ -760,7 +769,6 @@ lfs_data <- lfs_data %>%
     )
   )
 
-
 # Label disability variable
 var_label(lfs_data$disabled) <- "Equality Act Disabled (1/0)"
 
@@ -787,6 +795,7 @@ table(lfs_data$EMPMON, useNA = "always")
 # Generate tenure variable
 lfs_data <- lfs_data %>%
   mutate(tenure = EMPMON) %>%
+  
   # Labour-related variables:
   # observations with "No answer" or "Not applicable" are removed for employed individuals,
   # while unemployed individuals are retained and these values are recoded as NA.
@@ -809,7 +818,7 @@ table(lfs_data$tenure, useNA = "always")
 # FDPCH19 - Number of dependent children in family aged under 19
 
 # Tabulate original variable
-table(lfs_data$FDPCH19)
+table(lfs_data$FDPCH19, useNA = "always")
 
 # Dropping missing / no answers: -8 = No answer, -9 = Not applicable
 # -9 = Not applicable, not applicable does not warrant dropping
@@ -828,10 +837,14 @@ var_label(lfs_data$dep19) <- "Number of dependent children aged under 19"
 # Drop original LFS dependent children variables
 lfs_data <- lfs_data %>% select(-c(FDPCH9, FDPCH4, FDPCH2, FDPCH15, FDPCH16, FDPCH19))
 
+# Tabulate new variable
+table(lfs_data$dep19, useNA = "always")
 
 # ========================================
 # Age
 # ========================================
+#  AGE- Age of respondent 
+# (0-99) Age of respondent
 
 # Tabulate original variable
 table(lfs_data$AGE)
