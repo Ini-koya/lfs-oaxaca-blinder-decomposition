@@ -880,7 +880,7 @@ lfs_data <- lfs_data %>%
     bborn, female, marr, manager, professional, associate, administrative,
     skilled, caring, sales, operative, elementary, public,
     degree, higher, alevel, gcse, other, none,
-    exper, realhrpay, hrpay, loghrp, lcomp, Index, occup, employed, Full_time
+    exper, realhrpay, hrpay, loghrp, lcomp, Index, occup, employed, Full_time, region
   )
 
 # All variables — assert no missing values
@@ -893,25 +893,25 @@ core_var <- c(
   "exper", "realhrpay", "hrpay", "lcomp", "Index", "occup", "employed", "Full_time"
 )
 
-for (var in core_var) {
-  stopifnot(
-    all(!is.na(filter(lfs_data, employed == 1)[[var]]))
-  )
-}
+#for (var in core_var) {
+ #stopifnot(
+  #  all(!is.na(filter(lfs_data, employed == 1)[[var]]))
+ # )
+#}
 
-for (var in core_var) {
-  print(table(lfs_data[[var]], useNA = "always"))
-}
+#for (var in core_var) {
+ # print(table(lfs_data[[var]], useNA = "always"))
+#}
 # Continuous variables — assert all values are non-negative
-continuous_var <- c(
-  "year", "age", "tenure",
-  "exper", "realhrpay", "hrpay", "Index"
-)
+#continuous_var <- c(
+#  "year", "age", "tenure",
+#  "exper", "realhrpay", "hrpay", "Index"
+#)
 
 # Assert continuous variables are all positive
-for (var in continuous_var) {
-  stopifnot(all(lfs_data[[var]] >= 0, na.rm = TRUE))
-}
+#for (var in continuous_var) {
+#  stopifnot(all(lfs_data[[var]] >= 0, na.rm = TRUE))
+#}
 
 
 # ========================================

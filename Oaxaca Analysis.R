@@ -24,7 +24,8 @@ library(oaxaca)
 library(dreamerr)
 library(fixest)
 library(leaps)
-library(sampleSelection)
+library(pscl)
+#library(sampleSelection)
 
 # ====================
 # 2. Paths and data
@@ -60,7 +61,7 @@ lfs_data <- lfs_data %>%
 # Define list of control variables used in all core regressions
 vars <- c(
   "exper", "exper2", "female",  "bborn", "disabled",
-  "tenure", "London", "public",
+  "tenure", "london", "public",
   "degree", "higher", "alevel", "gcse", "other",
   "manager", "professional", "associate", "administrative",
   "skilled", "caring", "sales", "elementary", "lcomp"
@@ -68,22 +69,21 @@ vars <- c(
 
 # Define list of control variables used in probit regression for Heckman correction
 vars_IMR <- c(
-  "age2", "female", "marr", "bborn", "disabled",
-  "tenure", "dep19", "London", "public",
-  "degree", "higher", "alevel", "gcse", "other",
-  "manager", "professional", "associate", "administrative",
-  "skilled", "caring", "sales", "elementary", "lcomp"
+  "age", "age2", "female", "marr", "bborn", "disabled",
+  "dep19", "london","degree", "higher", "alevel", "gcse",
+  "other", "black", "mixed", "indian", "pakistani", "bangladeshi",
+  "chinese"
 )
 
 # Convert vector of variables into regression formula string
 regressors <- paste(vars, collapse = " + ")
 
 
-
 # Convert vector of variables into regression formula string(Heckman correction)
 regressors_IMR <- paste(vars_IMR, collapse = " + ")
 
-
+# Convert vector of variables into regression formula string(Oaxaca blinder decomp)
+regressors_oaxaca <- paste(c(vars, "IMR"), collapse = " + ")
 
 # Define reference ethnic groups for pairwise comparisons
 reference_groups <- c("white", "indian", "chinese")
@@ -97,6 +97,39 @@ ethnic_groups <- c(
 # Initialise list to store regression and Oaxaca outputs
 Model <- list()
 
+# ======================================================
+# Heckman Selection Correction
+# Stage 1: Probit model of employment probability
+# Estimated on full sample (employed and unemployed)
+# Generates Inverse Mills Ratio (IMR) to correct for
+# selection bias in the second stage wage equation
+# ======================================================
+
+probit_model <- glm(
+  as.formula(paste("employed ~", regressors_IMR, "+ factor(year)","+ factor(region)")), 
+  data = lfs_data, 
+  family = binomial(link = "probit")
+)
+
+#Compute and add IMR to the main dataset
+lfs_data <- lfs_data %>%
+    mutate(
+         fitted_prob = fitted(probit_model),
+        IMR = dnorm(qnorm(fitted_prob)) / pnorm(qnorm(fitted_prob)))
+
+
+# McFadden's pseudo-R²
+pR2(probit_model)
+
+# Classification accuracy
+
+predicted <- ifelse(fitted(probit_model) > 0.5, 1, 0)
+table(predicted, lfs_data$employed)
+
+# Summarize the IMR ratio by ethnicity
+lfs_data %>%
+  group_by(ethnic) %>%
+  summarise(mean_IMR = mean(IMR, na.rm = TRUE))
 
 # ======================================================
 # 5. Pooled and Pairwise regressions and Oaxaca decomposition
@@ -106,11 +139,17 @@ Model <- list()
 # A. Pooled regression
 #----------------------
 
-# Run OLS regression with year fixed effects
+# Run OLS regression with year fixed effects(without Heckman)
 Pooled_model <- feols(
   as.formula(paste("loghrp ~", regressors, "| year")),
   data = lfs_data,
   data.save = TRUE)
+  
+  # Run OLS regression with year fixed effects(with Heckman)
+  Pooled_model_IMR <- feols(
+    as.formula(paste("loghrp ~", regressors,"+ IMR", "| year")),
+    data = lfs_data,
+    data.save = TRUE)
 
 individual_model <- list()
 
@@ -155,26 +194,16 @@ for (Rgroup in reference_groups) {
 
       # Run OLS regression with year fixed effects
       pair_model <- feols(
-        as.formula(paste("loghrp ~", regressors, "| year")),
+        as.formula(paste("loghrp ~", regressors_oaxaca, "| year")),
         data = df_sub,
         data.save = TRUE
       )
-      
-      # Estimate the Heckman model and extract the inverse miller ratio(IMR)
-      heck <- heckit(
-      selection =  as.formula(paste("employed ~",regressors_IMR, "+ factor(year)")),     # selection equation
-      outcome   =  as.formula(paste("loghrp ~", regressors, "+ factor(year)")),     # wage equation
-      data      = df_sub)
-      
-      
-      # Store IMR in subset data
-      df_sub$IMR <- heck$invMills
 
-      # Run Oaxaca-Blinder decomposition
+      # Run Oaxaca-Blinder decomposition with Heckman correction
       # Outcome: log hourly pay
       # Group variable: current comparison group
       oaxaca_result <- oaxaca(
-        as.formula(paste("loghrp ~", regressors,"+ IMR", "|", group)),
+        as.formula(paste("loghrp ~", regressors_oaxaca, "|", group, "| factor(year)")),
         data = df_sub,
         R = NULL
       )
@@ -182,12 +211,11 @@ for (Rgroup in reference_groups) {
       # Store both regression and Oaxaca results
       Model[[Rgroup]][[group]] <- list(
         regression = pair_model,
-        oaxaca = oaxaca_result
+        oaxaca_IMR = oaxaca_result
       )
     }
   }
 }
-
 
 
 # Clean up temporary objects(optional)
@@ -228,13 +256,12 @@ modelsummary(
 
 # Initialise output tables
 oaxaca_summary <- data.frame()
-oaxaca_coefficients <- data.frame()
 
 # Loop through Oaxaca results
 for (Rgroup in names(Model)) {
   for (group in names(Model[[Rgroup]])) {
     # Extract Oaxaca object
-    ox <- Model[[Rgroup]][[group]][["oaxaca"]]
+    ox <- Model[[Rgroup]][[group]][["oaxaca_IMR"]]
     
     # --------------------
     # Aggregate results
@@ -263,42 +290,7 @@ for (Rgroup in names(Model)) {
     
     oaxaca_summary <- rbind(oaxaca_summary, temp_summary)
     
-    
-    # --------------------
-    # Coefficient-level results
-    # --------------------
-    
-    # Extract variable-level decomposition results using pooled weights
-    var_coeff <- ox$twofold$variables[[3]]
-    
-    # Convert matrix output into data frame
-    var_coeff <- as.data.frame(var_coeff)
-    var_coeff$Variable <- rownames(var_coeff)
-    
-    # Add group identifiers and overall decomposition values
-    var_coeff$Reference_group <- Rgroup
-    var_coeff$Comparison_group <- group
-    var_coeff$log_wage_gap <- gap
-    var_coeff$explained <- explained
-    var_coeff$unexplained <- unexplained
-    
-    # Extract clean contribution columns
-    temp_coeff <- data.frame(
-      reference_group = var_coeff$Reference_group,
-      comparison_group = var_coeff$Comparison_group,
-      variable = var_coeff$Variable,
-      explained_contribution = as.numeric(var_coeff[, "coef(explained)"]),
-      unexplained_contribution = as.numeric(var_coeff[, "coef(unexplained)"]),
-      explained_importance = abs(as.numeric(var_coeff[, "coef(explained)"])),
-      unexplained_importance = abs(as.numeric(var_coeff[, "coef(unexplained)"])),
-      explained_share = as.numeric(var_coeff[, "coef(explained)"]) / explained,
-      unexplained_share = as.numeric(var_coeff[, "coef(unexplained)"]) / unexplained,
-      log_wage_gap = gap,
-      total_explained = explained,
-      total_unexplained = unexplained
-    )
-    
-    oaxaca_coefficients <- rbind(oaxaca_coefficients, temp_coeff)
+   
   }
 }
 
