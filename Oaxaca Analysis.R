@@ -4,7 +4,6 @@
 # explained and unexplained components across ethnic groups
 # ======================================================
 
-
 # ====================
 # 1. Libraries
 # ====================
@@ -111,7 +110,7 @@ probit_model <- glm(
   family = binomial(link = "probit")
 )
 
-#Compute and add IMR to the main dataset
+# Compute and add IMR to the main data set
 lfs_data <- lfs_data %>%
     mutate(
          fitted_prob = fitted(probit_model),
@@ -122,7 +121,6 @@ lfs_data <- lfs_data %>%
 pR2(probit_model)
 
 # Classification accuracy
-
 predicted <- ifelse(fitted(probit_model) > 0.5, 1, 0)
 table(predicted, lfs_data$employed)
 
@@ -130,6 +128,8 @@ table(predicted, lfs_data$employed)
 lfs_data %>%
   group_by(ethnic) %>%
   summarise(mean_IMR = mean(IMR, na.rm = TRUE))
+
+rm(probit_model)
 
 # ======================================================
 # 5. Pooled and Pairwise regressions and Oaxaca decomposition
@@ -194,25 +194,30 @@ for (Rgroup in reference_groups) {
 
       # Run OLS regression with year fixed effects
       pair_model <- feols(
-        as.formula(paste("loghrp ~", regressors_oaxaca, "| year")),
+        as.formula(paste("loghrp ~", regressors_oaxaca, "| factor(year)")),
         data = df_sub,
-        data.save = TRUE
+        #data.save = TRUE  # Optional save data set used
       )
 
       # Run Oaxaca-Blinder decomposition with Heckman correction
       # Outcome: log hourly pay
       # Group variable: current comparison group
       oaxaca_result <- oaxaca(
-        as.formula(paste("loghrp ~", regressors_oaxaca, "|", group, "| factor(year)")),
+        as.formula(paste("loghrp ~", regressors_oaxaca,"+ factor(year)","|", group)),
         data = df_sub,
-        R = NULL
+        R = NULL # Bootstrap setting
       )
 
       # Store both regression and Oaxaca results
       Model[[Rgroup]][[group]] <- list(
         regression = pair_model,
-        oaxaca_IMR = oaxaca_result
-      )
+        oaxaca_IMR = oaxaca_result)
+        
+        # Clean up at end of each iteration
+        rm(df_sub, pair_model, oaxaca_result)
+        gc()  # forces garbage collection
+        
+      
     }
   }
 }
@@ -285,7 +290,8 @@ for (Rgroup in names(Model)) {
       explained = explained,
       unexplained = unexplained,
       explained_share = explained / gap,
-      unexplained_share = unexplained / gap
+      unexplained_share = unexplained / gap,
+    
     )
     
     oaxaca_summary <- rbind(oaxaca_summary, temp_summary)
@@ -296,9 +302,6 @@ for (Rgroup in names(Model)) {
 
 # Oaxaca results Summary
 write_xlsx(oaxaca_summary, file.path(reg_output, "Oaxaca_summary.xlsx"))
-
-# Oaxaca Coefficient-level results
-write_xlsx(oaxaca_coefficients, file.path(reg_output, "Oaxaca_coef.xlsx"))
 
 # Clean up temporary objects(optional)
 rm(Rgroup, group, ox, overall, gap, explained, unexplained, temp_summary, var_coeff, temp_coeff, pair_model)
@@ -387,3 +390,6 @@ for (Rgroup in names(Model)) {
 
 # Clean up temporary objects(optional)
 rm(model, p_dist, p_fitted, diag_df)
+
+
+corrs<-cor(lfs_data[, vars], use = "complete.obs"
