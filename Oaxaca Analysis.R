@@ -10,20 +10,14 @@
 # Load required packages for data manipulation, regression,
 # Oaxaca decomposition, and output formatting
 
-library(tidyverse)
-library(labelled)
-library(haven)
-library(writexl)
-library(tidyr)
-library(RColorBrewer)
-
-library(stats)
-library(modelsummary)
-library(oaxaca)
-library(dreamerr)
-library(fixest)
-library(leaps)
-library(pscl)
+library(tidyverse)      # mutate, group_by, summarise, ggplot2, ggsave
+library(haven)          # readRDS (if saved as haven format)
+library(writexl)        # write_xlsx
+library(oaxaca)         # oaxaca()
+library(fixest)         # feols()
+library(pscl)           # pR2() — McFadden pseudo R²
+library(modelsummary)   # modelsummary()
+library(data.table)     # as.data.table(), data.table subsetting
 #library(sampleSelection)
 
 # ====================
@@ -42,6 +36,8 @@ counterfactual_output <- "C:/Users/sndui/OneDrive/Dissertation/Dissertation proj
 # Load clean data
 lfs_data <- readRDS(file.path(clean_dir, "Clean.RDS"))
 
+# Data table conversion 
+lfs_data <- as.data.table(lfs_data)
 # ====================
 # 3. Further cleaning
 # ====================
@@ -129,7 +125,10 @@ lfs_data %>%
   group_by(ethnic) %>%
   summarise(mean_IMR = mean(IMR, na.rm = TRUE))
 
-rm(probit_model)
+rm(probit_model,predicted)
+gc()
+
+write_rds(lfs_data,file.path(clean_dir,"LFS_data_IMR"))
 
 # ======================================================
 # 5. Pooled and Pairwise regressions and Oaxaca decomposition
@@ -173,9 +172,9 @@ for (group in ethnic_groups) {
 }
 
 rm(df_sub)
-
+gc()
 #----------------------------------------------------------------
-# C. Main analysis(Pairwise regressions,OAXCA, heckman correction)
+# C. Main analysis(Pairwise regressions)
 #----------------------------------------------------------------
 
 # Loop over each reference group
@@ -199,22 +198,13 @@ for (Rgroup in reference_groups) {
         #data.save = TRUE  # Optional save data set used
       )
 
-      # Run Oaxaca-Blinder decomposition with Heckman correction
-      # Outcome: log hourly pay
-      # Group variable: current comparison group
-      oaxaca_result <- oaxaca(
-        as.formula(paste("loghrp ~", regressors_oaxaca,"+ factor(year)","|", group)),
-        data = df_sub,
-        R = NULL # Bootstrap setting
-      )
-
-      # Store both regression and Oaxaca results
+  
+      # Store regression 
       Model[[Rgroup]][[group]] <- list(
-        regression = pair_model,
-        oaxaca_IMR = oaxaca_result)
+        regression = pair_model)
         
         # Clean up at end of each iteration
-        rm(df_sub, pair_model, oaxaca_result)
+        rm(df_sub, pair_model)
         gc()  # forces garbage collection
         
       
@@ -223,17 +213,8 @@ for (Rgroup in reference_groups) {
 }
 
 
-# Clean up temporary objects(optional)
-rm(df_sub, model, oaxaca_result,pair_model)
-
-
-
-# ======================================================
-# 6. Export results
-# ======================================================
-
 # --------------------
-# 6a. Regression tables
+# Export Regression tables
 # --------------------
 
 # Combine all regression models into a named list
@@ -255,8 +236,54 @@ modelsummary(
 )
 
 
+
+#----------------------------------------------------------------
+# C. Main analysis(OAXCA decomposition + heckman correction)
+#----------------------------------------------------------------
+
+# Loop over each reference group
+for (Rgroup in reference_groups) {
+  # Create sub-list for each reference group
+  #Model[[Rgroup]] <- list()
+  
+  # Loop over comparison groups
+  for (group in ethnic_groups) {
+    # Skip comparison of group with itself
+    if (group != Rgroup) {
+      # Subset data to include only the two groups of interest
+      df_sub <- lfs_data[
+        lfs_data[[Rgroup]] == 1 | lfs_data[[group]] == 1,
+      ]
+      
+      
+      # Run Oaxaca-Blinder decomposition with Heckman correction
+      # Outcome: log hourly pay
+      # Group variable: current comparison group
+      oaxaca_result <- oaxaca(
+        as.formula(paste("loghrp ~", regressors_oaxaca,"+ factor(year)","|", group)),
+        data = df_sub,
+        R = NULL # Bootstrap setting
+      )
+      
+      # Store both regression and Oaxaca results
+      Model[[Rgroup]][[group]] <- list(
+        oaxaca_IMR = oaxaca_result$twofold,
+        y          = oaxaca_result$y,
+        N          = oaxaca_result$n
+      )
+      
+      # Clean up at end of each iteration
+      rm(df_sub, oaxaca_result)
+      gc()  # forces garbage collection
+      
+      
+    }
+  }
+}
+
+
 # ------------------------------------------------------
-# 6b.Oaxaca summary and coefficient-level results
+# Export .Oaxaca summary 
 # ------------------------------------------------------
 
 # Initialise output tables
@@ -266,31 +293,41 @@ oaxaca_summary <- data.frame()
 for (Rgroup in names(Model)) {
   for (group in names(Model[[Rgroup]])) {
     # Extract Oaxaca object
-    ox <- Model[[Rgroup]][[group]][["oaxaca_IMR"]]
+    ox  <- Model[[Rgroup]][[group]][["oaxaca_IMR"]]
+    y   <- Model[[Rgroup]][[group]][["y"]]        
+    N   <- Model[[Rgroup]][[group]][["N"]]
     
     # --------------------
     # Aggregate results
     # --------------------
     
-    # Extract overall decomposition results using pooled weights
-    overall <- ox$twofold$overall[3, ]
+    # Extract overall decomposition results using pooled weights 
+    #;adjustable based on preference of common wage structure
+    # Row 1 = Group B (comparison) coefficients as reference wage structure
+    # Row 2 = Group A (reference) coefficients as reference wage structure  
+    # Row 3 = Pooled 50/50 average of both groups' coefficients
+    # Row 4 = Cotton weights — weighted by relative group size
+    # Row 5 = Neumark — pooled regression coefficients (theoretically preferred)
+    # Row 6 = Oaxaca-Ransom — alternative pooled using variance-covariance weights
+    overall <- ox$overall[2, ] 
     
     # Extract wage gap components
-    gap <- ox$y$y.diff
     explained <- overall["coef(explained)"]
     unexplained <- overall["coef(unexplained)"]
+    gap         <- explained + unexplained
     
     # Store aggregate Oaxaca results
     temp_summary <- data.frame(
-      reference_group = Rgroup,
-      comparison_group = group,
-      mean_log_wage_reference = ox$y$y.A,
-      mean_log_wage_comparison = ox$y$y.B,
-      log_wage_gap = gap,
-      explained = explained,
-      unexplained = unexplained,
-      explained_share = explained / gap,
-      unexplained_share = unexplained / gap,
+      reference_group          = Rgroup,
+      comparison_group         = group,
+      mean_log_wage_reference  = y$y.A,
+      mean_log_wage_comparison = y$y.B,
+      log_wage_gap             = gap,
+      explained                = explained,
+      unexplained              = unexplained,
+      explained_share          = explained / gap,
+      unexplained_share        = unexplained / gap,
+      N                        = N$n.pooled
     
     )
     
@@ -304,7 +341,7 @@ for (Rgroup in names(Model)) {
 write_xlsx(oaxaca_summary, file.path(reg_output, "Oaxaca_summary.xlsx"))
 
 # Clean up temporary objects(optional)
-rm(Rgroup, group, ox, overall, gap, explained, unexplained, temp_summary, var_coeff, temp_coeff, pair_model)
+rm(Rgroup, group, ox, overall, gap, explained, unexplained, temp_summary)
 
 
 
