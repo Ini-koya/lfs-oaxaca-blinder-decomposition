@@ -1,4 +1,4 @@
-#Library packages
+# Library packages
 library(tidyverse)
 library(haven)
 
@@ -30,11 +30,35 @@ final_vars <- c(
   "SC10MMJ", "SC20MMJ",
   "ILODEFR", "GRSSWK", "POTHR", "BUSHR", "MPNR02", "PUBLICR", "EMPMON",
   "FDPCH2", "FDPCH4", "FDPCH9", "FDPCH15", "FDPCH16", "FDPCH19",
-  "MARDY6", "EDAGE", "PAIDHRU", "ETHUKEUL", "STATR", "GOVTOF2",
+  "MARDY6", "EDAGE", "PAIDHRU", "STATR", "GOVTOF2",
   "HIQUL15D", "HIQUL22D",
-  "year", "quarter","ETHUK11", "FTPTWK", "CRY01", "DISCURR"
+  "year", "quarter", "FTPTWK", "CRY01", "DISCURR",
+  "ETHUK11", "ETHGB13", "ETHEW18",
+  "ETHEWEUL", "ETHGBEUL", "ETHUKEUL",
+  "ETHCEN15", "ETHCEN6", "ETHUK14", "ETHUK8"
 )
 
+
+files_list <- list.files(
+  path = raw_dir,
+  pattern = "\\.dta$",
+  full.names = TRUE
+)
+
+eth_summary <- lapply(files_list, function(f) {
+  
+  vars <- names(read_dta(f, n_max = 1))
+  
+  eth_vars <- vars[substr(vars, 1, 3) == "ETH"]
+  
+  data.frame(
+    file = basename(f),
+    eth_variables = paste(sort(eth_vars), collapse = ", ")
+  )
+}) %>%
+  bind_rows()
+
+View(eth_summary)
 
 # ========================================
 # Quarter mapping
@@ -84,12 +108,13 @@ files_list <- list.files(
         quarter = quarters[[q]]        # assign quarter value
       )
   
-  # Save cleaned dataset as RDS file in modified directory
+  # Save cleaned data-set as RDS file in modified directory
   saveRDS(
     data,
     file.path(mod_dir, paste0(fname, "_mod.rds"))
-  )
-
+         )
+  gc()
+  rm(data)
 }
 
 # ========================================

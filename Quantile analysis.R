@@ -53,152 +53,169 @@ ethnic_groups <- c(
 
 # Initialise list to store regression and Oaxaca outputs
 Model <- list()
-# ======================================================
-# D. RIF-Oaxaca Quantile Decomposition
-# ======================================================
-hrp <- exp(lfs_data$loghrp)
-
-cutoffs <- quantile(hrp, probs = seq(0.1, 1, 0.1), na.rm = TRUE)
-
-data.frame(
-  decile = 1:10,
-  cutoff_value = cutoffs,
-  count_at_or_below = sapply(cutoffs, \(x) sum(hrp <= x, na.rm = TRUE))
-)
-
-#----------------------------------------------------------------
-# C. RIF Pairwise regressions
-#----------------------------------------------------------------
-# Helper function: RIF for quantile
-make_rif <- function(y, tau) {
-  q <- quantile(y, tau, na.rm = TRUE)
-
-  dens <- density(y, na.rm = TRUE, bw = "SJ")
-  f_q <- approx(dens$x, dens$y, xout = q)$y
-  f_q <- max(f_q, 1e-4)
-
-  q + (tau - as.numeric(y <= q)) / f_q
-}
-
-quantiles <- c(0.1, 0.25, 0.5, 0.75, 0.9)
-
-Model <- list()
-
-for (Rgroup in reference_groups) {
-  Model[[Rgroup]] <- list()
-
-  for (group in ethnic_groups) {
-    if (group != Rgroup) {
-      pair_name <- paste(Rgroup, group, sep = "_vs_")
-      Model[[Rgroup]][[pair_name]] <- list()
-
-      df_sub <- as.data.frame(
-        lfs_data[lfs_data[[Rgroup]] == 1 | lfs_data[[group]] == 1, ]
-      )
-
-      for (q in quantiles) {
-        q_name <- paste0("q", q * 100)
-        rif_var <- paste0("rif_", q_name)
-
-        df_sub[[rif_var]] <- make_rif(df_sub$loghrp, q)
-
-        pair_model <- lm(
-          as.formula(
-            paste(rif_var, "~", group, "+", regressors_oaxaca, "+ factor(year)")
-          ),
-          data = df_sub
-        )
-
-        Model[[Rgroup]][[pair_name]][[q_name]] <- pair_model
-
-        # remove temporary RIF variable
-        df_sub[[rif_var]] <- NULL
-
-        rm(pair_model)
-        gc(FALSE)
-      }
-
-      rm(df_sub)
-      gc()
-    }
-  }
-}
 
 #----------------------------------------------------------------
 # C. RIF decomposiiton
 #----------------------------------------------------------------
 # Helper function: Recentered Influence Function for a given quantile
 make_rif <- function(y, tau) {
-  q <- quantile(y, tau, na.rm = TRUE)
-  f_q <- approx(density(y, na.rm = TRUE, bw = "SJ")$x, # SJ bandwidth more robust
-    density(y, na.rm = TRUE, bw = "SJ")$y,
-    xout = q
+  
+  # Remove missing observations for estimating quantile and density
+  y_nonmiss <- y[!is.na(y)]
+  
+  # Estimate unconditional quantile
+  q_tau <- as.numeric(quantile(y_nonmiss, tau, na.rm = TRUE, names = FALSE))
+  
+  # Estimate density once
+  dens <- density(y_nonmiss, bw = "SJ")
+  
+  # Approximate density at the quantile
+  f_q <- approx(
+    x = dens$x,
+    y = dens$y,
+    xout = q_tau,
+    rule = 2
   )$y
-  f_q <- max(f_q, 1e-4) # floor to prevent division by near-zero
-  q + (tau - as.numeric(y <= q)) / f_q
+  
+  # Avoid division by very small density
+  f_q <- max(f_q, 1e-4)
+  
+  # Return RIF, preserving missing values
+  rif <- q_tau + (tau - as.numeric(y <= q_tau)) / f_q
+  rif[is.na(y)] <- NA_real_
+  
+  return(rif)
 }
 
 # Quantiles for decomposition
-quantiles <- c(0.1, 0.25, 0.5, 0.75, 0.9)
+quantiles <- c( 0.25, 0.5, 0.75, 0.9)
 
 # Summary table
 rif_summary <- data.frame()
-
 # Loop over reference groups
 for (Rgroup in reference_groups) {
+  
   # Loop over comparison groups
   for (group in ethnic_groups) {
+    
     if (group != Rgroup) {
+      
       # Subset to reference and comparison group
       df_sub <- as.data.frame(
         lfs_data[lfs_data[[Rgroup]] == 1 | lfs_data[[group]] == 1, ]
       )
-
+      
       # Loop over quantiles
       for (q in quantiles) {
+        
         q_name <- paste0("q", q * 100)
         rif_var <- paste0("rif_", q_name)
-
-        # Compute RIF outcome
-        df_sub[[rif_var]] <- make_rif(df_sub$loghrp, q)
-
-        # Run Oaxaca decomposition
+        
+        # ======================================================
+        # Compute group-specific RIF outcome
+        # ======================================================
+        
+        # Initialise RIF variable
+        df_sub[[rif_var]] <- NA_real_
+        
+        # Compute RIF using reference-group quantile and density
+        df_sub[df_sub[[Rgroup]] == 1, rif_var] <-
+          make_rif(
+            df_sub[df_sub[[Rgroup]] == 1, "loghrp"],
+            q
+          )
+        
+        # Compute RIF using comparison-group quantile and density
+        df_sub[df_sub[[group]] == 1, rif_var] <-
+          make_rif(
+            df_sub[df_sub[[group]] == 1, "loghrp"],
+            q
+          )
+        
+        # ======================================================
+        # Run Oaxaca decomposition on RIF outcome
+        # ======================================================
+        
         rif_result <- oaxaca(
-          formula = as.formula(paste(
-            rif_var, "~", regressors_oaxaca, "+ factor(year) |", group
-          )),
+          formula = as.formula(
+            paste(
+              rif_var,
+              "~",
+              regressors_oaxaca,
+              "+ factor(year) |",
+              group
+            )
+          ),
           data = df_sub,
+          group.weights = 0,
           R = NULL
         )
-
-        # Extract reference-group coefficient results
-        overall <- rif_result$twofold$overall[2, ]
-        explained <- overall["coef(explained)"]
-        unexplained <- overall["coef(unexplained)"]
+        
+        # Extract row where group.weight == 0
+        # (reference-group coefficients used as weighting structure)
+        overall <- as.data.frame(rif_result$twofold$overall)
+        
+        overall <- overall[
+          as.numeric(overall$group.weight) == 0,
+        ]
+        
+        # Extract decomposition components as numeric values
+        explained <- as.numeric(overall[1, "coef(explained)"])
+        unexplained <- as.numeric(overall[1, "coef(unexplained)"])
         gap <- explained + unexplained
-
+        
+        # ======================================================
+        # Calculate actual wage quantiles for interpretation
+        # ======================================================
+        
+        q_ref <- quantile(
+          df_sub[df_sub[[Rgroup]] == 1, "loghrp"],
+          q,
+          na.rm = TRUE
+        )
+        
+        q_comp <- quantile(
+          df_sub[df_sub[[group]] == 1, "loghrp"],
+          q,
+          na.rm = TRUE
+        )
+        
+        # ======================================================
         # Store summary results only
-        rif_summary <- rbind(rif_summary, data.frame(
-          reference_group = Rgroup,
-          comparison_group = group,
-          quantile = q,
-          mean_log_wage_reference = rif_result$y$y.A,
-          mean_log_wage_comparison = rif_result$y$y.B,
-          rif_gap = gap,
-          explained = explained,
-          unexplained = unexplained,
-          explained_share = explained / gap,
-          unexplained_share = unexplained / gap,
-          N = rif_result$n$n.pooled
-        ))
+        # ======================================================
+        
+        rif_summary <- rbind(
+          rif_summary,
+          data.frame(
+            reference_group = Rgroup,
+            comparison_group = group,
+            quantile = q,
+            
+            # Actual quantile values
+            quantile_log_wage_reference = q_ref,
+            quantile_log_wage_comparison = q_comp,
+            raw_quantile_gap = q_ref - q_comp,
+            
+            # RIF-Oaxaca decomposition
+            rif_gap = gap,
+            explained = explained,
+            unexplained = unexplained,
+            
+            # Shares of total gap
+            explained_share = explained / gap,
+            
+            unexplained_share = unexplained / gap,
+            
+            N = rif_result$n$n.pooled
+          )
+        )
       }
-
+      
       # Remove temporary objects
-      rm(df_sub, rif_result)
+      rm(df_sub, rif_result,q_ref,q_comp,overall,explained,unexplained)
       gc()
     }
   }
 }
-
 # Export summary table
 write_xlsx(rif_summary, file.path(reg_output, "RIF_quantile_summary.xlsx"))

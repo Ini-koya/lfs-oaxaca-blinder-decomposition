@@ -7,6 +7,7 @@ library(labelled)
 library(haven)
 library(writexl)
 library(readxl)
+library(data.table)     # as.data.table(), data.table subsetting
 
 # Setting file paths
 raw_dir <- "C:/Users/sndui/OneDrive/Dissertation/Dissertation project/3. Input data/modified raw data/Combined data"
@@ -22,10 +23,11 @@ out_dir <- "C:/Users/sndui/OneDrive/Dissertation/Dissertation project/3. Input d
 lfs_data <- readRDS(file.path(raw_dir, "combined_lfs_all_quarters.rds"))
 
 
+# Data table conversion 
+lfs_data <- as.data.table(lfs_data)
 # ====================
 ## II. Data Cleaning
 # ====================
-
 
 # ========================================
 # Rename / basic variables
@@ -124,9 +126,25 @@ table(lfs_data$london, useNA = "always")
 # 7 = Any other Asian background, 8 = Black/African/Caribbean/Black British,
 # 9 = Other ethnic group, -8 = No answer, -9 = Not applicable
 
+#ETHUK14 – Ethnicity (14 categories) UK level (NI included) 
+#11 = African 
+#12 = Caribbean 
+
+#ETHUK14 – Ethnicity (14 categories) UK level (NI included) 
+#11 = African 
+#12 = Caribbean 
+
+# ETHEWEUL – Ethnicity (16 categories) England and Wales level 
+# 13 = Black African 
+# 14 = Black Caribbean
+
 # Dropping missing / no answers: -8 = No answer, -9 = Not applicable
 # Ethnicity is a key characteristic required for all observations included in the analysis.
 lfs_data <- lfs_data %>% filter(!(ETHUKEUL %in% c(-8, -9)) & !is.na(ETHUKEUL))
+
+# Tabulate original variable
+table(lfs_data$ETHUKEUL, useNA = "always")
+table(lfs_data$ETHEWEUL, useNA = "always")
 
 # Ethnicity named vector
 ethnic <- c(
@@ -145,6 +163,19 @@ for (i in names(ethnic)) {
     mutate(!!i := ifelse(ETHUKEUL == ethnic[i], 1, 0))
 }
 
+# create dummies that appear in other LFS variables
+lfs_data <- lfs_data %>% mutate(
+  black_african = case_when(
+    ETHEWEUL == 13 ~ 1,
+    ETHUK14  == 11 ~ 1,
+    TRUE           ~ 0
+  ),
+  black_caribbean = case_when(
+    ETHEWEUL == 14 ~ 1,
+    ETHUK14  == 12 ~ 1,
+    TRUE           ~ 0
+  )
+)
 # Label ethnicity dummy variables
 for (i in names(ethnic)) {
   var_label(lfs_data[[i]]) <- paste0(i, " (1/0)")
@@ -161,6 +192,8 @@ lfs_data <- lfs_data %>%
       bangladeshi == 1 ~ "Bangladeshi",
       chinese == 1 ~ "Chinese",
       black == 1 ~ "Black",
+      black_caribbean == 1  ~ "Black carribean",
+      black_african == 1 ~ " Black African",
       TRUE ~ NA_character_
     ),
     ethnic = factor(ethnic)
@@ -868,10 +901,6 @@ lfs_data <- lfs_data %>% filter(age >= 18)
 # IV. Keep and order final variables
 # ===============================================================================
 
-# Employed subset of data
-lfs_data_employed <- filter(lfs_data, employed == 1)
-
-
 # Keep only required variables
 lfs_data <- lfs_data %>%
   select(
@@ -880,7 +909,8 @@ lfs_data <- lfs_data %>%
     bborn, female, marr, manager, professional, associate, administrative,
     skilled, caring, sales, operative, elementary, public,
     degree, higher, alevel, gcse, other, none,
-    exper, realhrpay, hrpay, loghrp, lcomp, Index, occup, employed, Full_time, region
+    exper, realhrpay, hrpay, loghrp, lcomp, Index, occup, employed, Full_time, region, 
+    black_african, black_caribbean
   )
 
 # All variables — assert no missing values
@@ -913,7 +943,7 @@ core_var <- c(
 #  stopifnot(all(lfs_data[[var]] >= 0, na.rm = TRUE))
 #}
 
-
+table(lfs_data$black_caribbean$employed==1)
 # ========================================
 # V. Save cleaned dataset
 # ========================================
