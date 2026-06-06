@@ -141,7 +141,7 @@ for (Rgroup in reference_groups) {
             paste(
               rif_var,
               "~",
-              regressors_oaxaca,
+              regressors,
               "+ factor(year) |",
               group
             )

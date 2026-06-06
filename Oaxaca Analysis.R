@@ -193,7 +193,7 @@ for (Rgroup in reference_groups) {
 
       # Run OLS regression with year fixed effects
       pair_model <- feols(
-        as.formula(paste("loghrp ~", regressors_oaxaca, "| factor(year)")),
+        as.formula(paste("loghrp ~", regressors, "| factor(year)")),
         data = df_sub,
         #data.save = TRUE  # Optional save data set used
       )
@@ -238,7 +238,7 @@ modelsummary(
 
 
 #----------------------------------------------------------------
-# C. Main analysis(OAXCA decomposition + heckman correction)
+# C. Main analysis(OAXCA decomposition )
 #----------------------------------------------------------------
 
 # Loop over each reference group
@@ -260,7 +260,7 @@ for (Rgroup in reference_groups) {
       # Outcome: log hourly pay
       # Group variable: current comparison group
       oaxaca_result <- oaxaca(
-        as.formula(paste("loghrp ~", regressors_oaxaca,"+ factor(year)","|", group)),
+        as.formula(paste("loghrp ~", regressors,"+ factor(year)","|", group)),
         data = df_sub,
         R = NULL # Bootstrap setting
       )
